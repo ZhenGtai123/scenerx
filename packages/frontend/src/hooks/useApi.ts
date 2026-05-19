@@ -357,9 +357,19 @@ function classifyStatusMessage(msg: string): RecommendStage {
 }
 
 export function useRecommendIndicators() {
+  const queryClient = useQueryClient();
   const [progress, setProgress] = useState<RecommendProgress>(INITIAL_PROGRESS);
 
   const mutation = useMutation({
+    // Stage 1 returns a refreshed recommendation set; invalidate the
+    // cached project so the next render picks up the new indicators
+    // instead of showing the stale list (which would otherwise blank
+    // the panel when the user switches an indicator).
+    onSuccess: (_, variables) => {
+      if (variables.project_id) {
+        queryClient.invalidateQueries({ queryKey: queryKeys.project(variables.project_id) });
+      }
+    },
     mutationFn: (request: {
       project_name: string;
       performance_dimensions: string[];
