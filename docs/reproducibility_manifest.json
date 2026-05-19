@@ -1,0 +1,202 @@
+{
+  "manifest_version": "2026-05-17",
+  "scope": "Alignment manifest for SceneRxAI_polished1-28_v3edits_v5.docx, SceneRX-AI.svg/pdf, scenerx, and the sibling AI_City_View service.",
+  "repository_relationship": {
+    "application_repo": "scenerx",
+    "vision_service_repo": "../AI_City_View",
+    "relationship": "sibling service called over HTTP",
+    "not_literal_subdirectory_of_scenerx": true,
+    "configuration_key": "vision_api_url",
+    "environment_variable": "VISION_API_URL"
+  },
+  "routes": {
+    "scenerx_backend_prefix": "/api/vision",
+    "scenerx_routes": [
+      "/api/vision/analyze",
+      "/api/vision/analyze/panorama",
+      "/api/vision/analyze/project-image",
+      "/api/vision/analyze/project-image/panorama"
+    ],
+    "ai_city_view_routes": [
+      "/analyze",
+      "/analyze/panorama",
+      "/health"
+    ],
+    "route_files": [
+      "packages/backend/app/api/routes/vision.py",
+      "packages/backend/app/services/vision_client.py",
+      "../AI_City_View/server.py"
+    ]
+  },
+  "paper_stage_mapping": [
+    {
+      "paper_stage": "Project definition and context",
+      "repo_stage": "Project setup / project query",
+      "primary_files": [
+        "packages/frontend/src/pages/ProjectWizard.tsx",
+        "packages/backend/app/models/project.py",
+        "packages/backend/app/api/routes/projects.py",
+        "packages/backend/app/services/project_context_builder.py"
+      ]
+    },
+    {
+      "paper_stage": "Evidence-based indicator matching",
+      "repo_stage": "Stage 1",
+      "primary_files": [
+        "packages/backend/app/services/gemini_client.py",
+        "packages/backend/app/services/knowledge_base.py",
+        "packages/backend/app/services/transferability.py"
+      ],
+      "agent_label": "Ranker/Selector"
+    },
+    {
+      "paper_stage": "Vision analysis",
+      "repo_stage": "Stage 2",
+      "primary_files": [
+        "../AI_City_View/server.py",
+        "../AI_City_View/pipeline/stage2_ai_inference.py",
+        "../AI_City_View/pipeline/stage4_intelligent_fmb.py",
+        "../AI_City_View/pipeline/stage6_generate_images.py",
+        "packages/backend/app/services/vision_client.py"
+      ]
+    },
+    {
+      "paper_stage": "Metric calculation and aggregation",
+      "repo_stage": "Stage 2.5",
+      "primary_files": [
+        "packages/backend/app/services/metrics_calculator.py",
+        "packages/backend/app/services/metrics_aggregator.py",
+        "packages/backend/data/metrics_code/"
+      ]
+    },
+    {
+      "paper_stage": "Zone diagnostics",
+      "repo_stage": "Stage 3",
+      "primary_files": [
+        "packages/backend/app/services/zone_analyzer.py"
+      ]
+    },
+    {
+      "paper_stage": "Diagnosis and strategy synthesis",
+      "repo_stage": "Stage 3 / design stage",
+      "primary_files": [
+        "packages/backend/app/services/design_engine.py"
+      ],
+      "agent_labels": [
+        "Agent A: Spatial Diagnostician",
+        "Deterministic Python IOM matching",
+        "Agent B: Strategy Synthesiser"
+      ]
+    },
+    {
+      "paper_stage": "Narrative report",
+      "repo_stage": "AI report stage",
+      "primary_files": [
+        "packages/backend/app/services/report_service.py"
+      ],
+      "agent_label": "Agent C: Report Writer"
+    }
+  ],
+  "vision_models": {
+    "semantic_backend_default": "oneformer_ade20k",
+    "semantic_model_id": "shi-labs/oneformer_ade20k_swin_large",
+    "depth_backend": "Depth Anything V3",
+    "api_depth_model_default": "depth-anything/DA3METRIC-LARGE",
+    "cli_depth_model_default": "depth-anything/DA3NESTED-GIANT-LARGE-1.1",
+    "per_view_execution": "semantic segmentation and depth estimation are run per view; panorama mode analyzes left/front/right crops",
+    "sky_handling": "DA3 sky output and/or semantic fallback logic, then FMB background handling; not an explicit Boolean-OR/pixel-level OR fusion claim",
+    "fmb_thresholds_meters": {
+      "foreground_max": 10.0,
+      "middleground_max": 50.0
+    }
+  },
+  "vision_outputs": {
+    "core_stage6_image_layers_count": 23,
+    "core_stage6_image_layers": [
+      "original",
+      "semantic_map",
+      "depth_map",
+      "openness_map",
+      "fmb_map",
+      "foreground_map",
+      "middleground_map",
+      "background_map",
+      "semantic_foreground",
+      "semantic_middleground",
+      "semantic_background",
+      "depth_foreground",
+      "depth_middleground",
+      "depth_background",
+      "openness_foreground",
+      "openness_middleground",
+      "openness_background",
+      "original_foreground",
+      "original_middleground",
+      "original_background",
+      "fmb_foreground",
+      "fmb_middleground",
+      "fmb_background"
+    ],
+    "optional_or_diagnostic_layers": [
+      "sky_mask",
+      "semantic_raw"
+    ],
+    "metadata_fields": [
+      "depth_stats",
+      "fmb_thresholds"
+    ]
+  },
+  "llm_runtime": {
+    "provider_setting": "llm_provider",
+    "default_provider": "gemini",
+    "default_gemini_model": "gemini-2.5-flash",
+    "supported_providers": [
+      "gemini",
+      "openai",
+      "anthropic",
+      "deepseek"
+    ],
+    "runtime_wording": "provider LLM or configured LLM backend",
+    "do_not_claim_fixed_runtime_model": "Gemini 3.1 Pro"
+  },
+  "knowledge_base_counts": {
+    "SVCs_P_Evidence_records": 342,
+    "SVCs_P_Evidence_unique_IND_codes": 88,
+    "I_SVCs_Operations_records": 342,
+    "I_SVCs_Operations_unique_IND_codes": 88,
+    "Transferability_Context_records": 137,
+    "A_indicators_Indicators_91_rows": 91
+  },
+  "frontend_stack": {
+    "react": "19",
+    "typescript": true,
+    "vite": "7",
+    "chakra_ui": "2",
+    "tanstack_react_query": "5",
+    "zustand": "5",
+    "tanstack_react_form_present": false
+  },
+  "analysis_statistics": {
+    "zone_diagnostics_file": "packages/backend/app/services/zone_analyzer.py",
+    "implemented_items": [
+      "z_scores",
+      "percentiles",
+      "coefficient_of_variation",
+      "Shapiro-Wilk",
+      "Kruskal-Wallis",
+      "Pearson correlation matrices",
+      "data-quality metadata for preferred correlation interpretation"
+    ]
+  },
+  "disallowed_legacy_claims": [
+    "AI_City_View is a literal subdirectory contained in scenerx",
+    "SAM 2.1 + LangSAM is the active default semantic model",
+    "dual-model parallel Boolean-OR fusion",
+    "/ai-city-view/infer",
+    "20 PNG layers",
+    "25 raster layers",
+    "runtime fixed to Gemini 3.1 Pro",
+    "Agent D",
+    "@tanstack/react-form"
+  ]
+}

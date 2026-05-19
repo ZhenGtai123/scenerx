@@ -18,30 +18,23 @@ from typing import Optional
 from app.models.analysis import ProjectContext
 
 
-def build_project_header(
-    project_context: ProjectContext,
-    *,
-    include_target_dimensions: bool = False,
-    brief_max_chars: int = 500,
-) -> str:
-    """Render the canonical Project section used at the top of LLM prompts.
+def _render_zone_graph(project_context: ProjectContext) -> Optional[str]:
+    """Render the Stage 1 zone-to-zone relation graph as a prompt block.
 
-    `include_target_dimensions` adds the "Target dimensions" row (Agent A
-    needs it for direction inference; Agent B does not).
+    Returns None when no zones or no relations are declared (legacy
+    independent-zone behaviour preserved). When present, the block is
+    Agent A's authoritative source for how to interpret cross-zone
+    correlations:
+      - 'adjacent / nearby / connected'  → permission for cross-zone claims
+      - 'contains'                       → parent-child hierarchy
+      - 'distant'                        → explicit exclusion marker against
+                                           spurious spatial-pattern claims
     """
-    name = project_context.project.get("name", "N/A")
-    climate = project_context.context.get("climate", {}).get("koppen_zone_id", "N/A")
-    setting = project_context.context.get("urban_form", {}).get("space_type_id", "N/A")
-    brief = (project_context.performance_query.get("design_brief", "") or "")[:brief_max_chars]
-
-    lines = [
-        "## Project",
-        f"- Name: {name}",
-        f"- Climate: {climate}",
-        f"- Setting: {setting}",
-        f"- Design brief: {brief}",
-    ]
-    if include_target_dimensions:
-        dims = project_context.performance_query.get("dimensions", [])
-        lines.append(f"- Target dimensions: {json.dumps(dims)}")
-    return "\n".join(lines)
+    project_dict = project_context.project or {}
+    zones = project_dict.get("spatial_zones") or []
+    relations = project_dict.get("spatial_relations") or []
+    if not zones or not relations:
+        return None
+    name_by_id = {z.get("zone_id"): (z.get("zone_name") or z.get("zone_id")) for z in zones}
+    lines = ["## Zone-to-Zone Relations (Stage 1 declared graph)"]
+    for r in relatio

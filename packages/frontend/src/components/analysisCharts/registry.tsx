@@ -157,7 +157,8 @@ export interface ChartDescriptor {
   /** Human-readable title shown in Card header + picker checkbox */
   title: string;
   /** Optional registry code rendered as a Badge next to the title.
-   * v4: unified scheme A1/A2 · B1–B4 · C1–C4 · D1–D3 (legacy M1–M4 retired). */
+   * v4: unified scheme A1/A2 · B1–B4 · C1–C4 · D1–D3 plus E1–E8
+   * when cluster diagnostics are available (legacy M1–M4 retired). */
   refCode?: string;
   /** Which tab this chart renders in */
   tab: ChartTab;
@@ -251,7 +252,7 @@ function correlationByLayer(ctx: ChartContext) {
 const LAYERS_FOR_PAYLOAD = ['full', 'foreground', 'middleground', 'background'];
 
 // ---------------------------------------------------------------------------
-// Registry (v4 / Module 5 — order = render order; refCodes A1/A2 · B1–B4 · C1–C4 · D1–D3)
+// Registry (v4 / Module 5 — order = render order; refCodes A1/A2 · B1–B4 · C1–C4 · D1–D3 · E1–E8)
 // ---------------------------------------------------------------------------
 //
 // v4 changes (Phase 1):
@@ -1184,6 +1185,7 @@ export const CHART_REGISTRY: ChartDescriptor[] = [
   {
     id: 'cluster-centroid-heatmap',
     title: 'Cluster Centroid Heatmap',
+    refCode: 'E1',
     tab: 'analysis',
     section: 'clustering',
     description:
@@ -1220,6 +1222,7 @@ export const CHART_REGISTRY: ChartDescriptor[] = [
   {
     id: 'silhouette-per-point',
     title: 'Per-Point Silhouette Plot',
+    refCode: 'E2',
     tab: 'analysis',
     section: 'clustering',
     description:
@@ -1277,6 +1280,7 @@ export const CHART_REGISTRY: ChartDescriptor[] = [
   {
     id: 'hdbscan-condensed-tree',
     title: 'HDBSCAN Condensed Tree',
+    refCode: 'E3',
     tab: 'analysis',
     section: 'clustering',
     description:
@@ -1308,6 +1312,7 @@ export const CHART_REGISTRY: ChartDescriptor[] = [
   {
     id: 'silhouette-curve',
     title: 'Silhouette Score Curve (KMeans last-resort fallback)',
+    refCode: 'E4',
     tab: 'analysis',
     section: 'clustering',
     description:
@@ -1342,6 +1347,7 @@ export const CHART_REGISTRY: ChartDescriptor[] = [
   {
     id: 'dendrogram',
     title: 'Ward Hierarchical Clustering',
+    refCode: 'E5',
     tab: 'analysis',
     section: 'clustering',
     description: 'Dendrogram from Ward linkage.',
@@ -1369,6 +1375,7 @@ export const CHART_REGISTRY: ChartDescriptor[] = [
   {
     id: 'cluster-spatial-smoothing',
     title: 'Cluster Spatial Smoothing',
+    refCode: 'E6',
     tab: 'analysis',
     section: 'clustering',
     description: 'Before/after KNN spatial smoothing comparison (needs GPS).',
@@ -1412,6 +1419,7 @@ export const CHART_REGISTRY: ChartDescriptor[] = [
   {
     id: 'archetype-radar',
     title: 'Cluster Radar Profiles',
+    refCode: 'E7',
     tab: 'analysis',
     section: 'clustering',
     description: 'z-score radar for each discovered cluster.',
@@ -1444,6 +1452,7 @@ export const CHART_REGISTRY: ChartDescriptor[] = [
   {
     id: 'cluster-size-distribution',
     title: 'Cluster Size Distribution',
+    refCode: 'E8',
     tab: 'analysis',
     section: 'clustering',
     description: 'Point count per cluster.',

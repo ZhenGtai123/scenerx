@@ -338,19 +338,3 @@ def calculate_for_layer(semantic_map_path, mask_path=None, original_photo_path=N
     except Exception as e:
         return {"success": False, "value": None,
                 "error": f"layer-aware wrapper failed: {e}"}
-0]):
-                m = m.resize((src_arr.shape[1], src_arr.shape[0]), Image.NEAREST)
-            mask_arr = np.array(m) > 127
-        src_arr[~mask_arr] = 0
-        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
-            Image.fromarray(src_arr).save(tmp.name)
-            tmp_path = tmp.name
-        try:
-            result = calculate_indicator(tmp_path)
-        finally:
-            try: os.unlink(tmp_path)
-            except: pass
-        return result
-    except Exception as e:
-        return {"success": False, "value": None,
-                "error": f"layer-aware wrapper failed: {e}"}

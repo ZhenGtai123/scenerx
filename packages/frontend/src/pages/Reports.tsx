@@ -1217,7 +1217,18 @@ function Reports() {
       // eslint-disable-next-line @typescript-eslint/no-unused-vars
       const { image_records: _ir, ...zoneAnalysisCompact } = zoneAnalysisResult;
       const projectContext = currentProject ? {
-        project: { name: currentProject.project_name, location: currentProject.project_location },
+        project: {
+          name: currentProject.project_name,
+          location: currentProject.project_location,
+          // v6.x — surface the Stage 1 zone graph to Agent A so cross-zone
+          // interpretation can be conditioned on declared edges rather than
+          // treating every zone pair as independent.
+          spatial_zones: (currentProject.spatial_zones || []).map(z => ({
+            zone_id: z.zone_id,
+            zone_name: z.zone_name,
+          })),
+          spatial_relations: currentProject.spatial_relations || [],
+        },
         context: {
           climate: { koppen_zone_id: currentProject.koppen_zone_id },
           urban_form: { space_type_id: currentProject.space_type_id, lcz_type_id: currentProject.lcz_type_id },
@@ -3275,7 +3286,7 @@ function Reports() {
                 {/* v4 / Module 1 — chart-grid gate. Originally required at
                     least one zone diagnostic, which made sense in zone-level
                     mode but unintentionally hid every single-zone chart
-                    (A1/A2 setup, C1/C3/C4 distribution + spatial, D1 global
+                    (A1/A2 setup, C1-C4 distribution + spatial, D1 global
                     stats) for image_level projects. After Single View was
                     introduced, those charts MUST render even when
                     sortedDiagnostics is empty — they're the whole point of
@@ -3990,22 +4001,4 @@ function Reports() {
 
             </TabPanels>
           </Tabs>
-        </Box>
-      )}
-
-      {/* Navigation */}
-      {routeProjectId && (
-        <HStack justify="space-between" mt={6}>
-          <Button as={Link} to={`/projects/${routeProjectId}/analysis`} variant="outline">
-            Back: Analysis
-          </Button>
-          <Button as={Link} to={`/projects/${routeProjectId}`} colorScheme="green">
-            Back to Project
-          </Button>
-        </HStack>
-      )}
-    </PageShell>
-  );
-}
-
-export default Reports;
+       

@@ -128,6 +128,14 @@ Same setup as Path B, but skip the bundled samples and create a project from you
 | 3 | **Zone Analysis** — Descriptive z-score diagnostics across zones | `ZoneAnalyzer` (v6.0) |
 | 4 | **Design Strategies** — LLM-generated intervention strategies grounded in evidence | `DesignEngine` (v6.0) |
 
+### Paper alignment
+
+The manuscript and architecture figure should align to the current code facts
+recorded in [`docs/paper_repo_mapping.md`](./docs/paper_repo_mapping.md) and
+[`docs/reproducibility_manifest.json`](./docs/reproducibility_manifest.json).
+Those files are the repo-side checklist for matching the paper, SceneRX-AI
+figure, this app, and the sibling `AI_City_View` vision service.
+
 ### Tech stack
 
 **Backend** FastAPI · Pydantic v2 · SQLAlchemy · Celery · multi-LLM (Gemini / OpenAI / Anthropic / DeepSeek)

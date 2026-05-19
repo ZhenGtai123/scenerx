@@ -44,7 +44,7 @@ import useAppToast from '../hooks/useAppToast';
 import PageShell from '../components/PageShell';
 import EncodingInfoPopover from '../components/EncodingInfoPopover';
 import { useEncodingSections } from '../hooks/useApi';
-import type { EncodingEntry } from '../types';
+import type { EncodingEntry, SpatialRelation } from '../types';
 
 // ============ Constants ============
 
@@ -119,6 +119,21 @@ interface SpatialZone {
   description?: string;
 }
 
+// Canonical zone-to-zone relation vocabulary.
+// Drawn from landscape-architecture spatial-syntax conventions and used
+// downstream by the analysis service to constrain cross-zone interpretation:
+//   - adjacent / connected / nearby  : permit cross-zone correlation claims
+//   - contains                       : hierarchical (parent zone aggregates child)
+//   - distant                        : explicit exclusion marker against
+//                                       spurious spatial-pattern claims
+const RELATION_TYPES: { id: string; name: string; defaultDirection: 'single' | 'bidirectional' }[] = [
+  { id: 'adjacent',  name: 'Adjacent (share boundary)',          defaultDirection: 'bidirectional' },
+  { id: 'nearby',    name: 'Nearby (within visual range)',       defaultDirection: 'bidirectional' },
+  { id: 'connected', name: 'Connected (path / circulation)',     defaultDirection: 'bidirectional' },
+  { id: 'contains',  name: 'Contains (hierarchical)',            defaultDirection: 'single' },
+  { id: 'distant',   name: 'Distant (no direct interaction)',    defaultDirection: 'bidirectional' },
+];
+
 // ============ Component ============
 
 function ProjectWizard() {
@@ -164,6 +179,10 @@ function ProjectWizard() {
   const [zones, setZones] = useState<SpatialZone[]>([]);
   const [zoneTypes] = useState(DEFAULT_ZONE_TYPES);
 
+  // Zone-to-zone relations (graph edges between spatial_zones).
+  // Empty array = zones treated as independent by downstream analysis.
+  const [relations, setRelations] = useState<SpatialRelation[]>([]);
+
   // Saving
   const [saving, setSaving] = useState(false);
 
@@ -208,6 +227,7 @@ function ProjectWizard() {
             description: z.description || '',
           }));
           setZones(loadedZones);
+          setRelations(project.spatial_relations || []);
         })
         .catch((error) => {
           console.error('Failed to load project:', error);
@@ -250,6 +270,42 @@ function ProjectWizard() {
 
     updateZone(zoneId, { types: newTypes });
   };
+
+  // ============ Relation Functions ============
+
+  const addRelation = () => {
+    if (zones.length < 2) {
+      toast({ title: 'Add at least two zones before declaring a relation', status: 'info' });
+      return;
+    }
+    setRelations([
+      ...relations,
+      {
+        from_zone: zones[0].id,
+        to_zone: zones[1].id,
+        relation_type: 'adjacent',
+        direction: 'bidirectional',
+      },
+    ]);
+  };
+
+  const updateRelation = (index: number, updates: Partial<SpatialRelation>) => {
+    setRelations(relations.map((r, i) => (i === index ? { ...r, ...updates } : r)));
+  };
+
+  const removeRelation = (index: number) => {
+    setRelations(prev => prev.filter((_, i) => i !== index));
+  };
+
+  // When a zone is removed, drop any relations that referenced it so we
+  // never persist dangling from_zone / to_zone ids to the API.
+  useEffect(() => {
+    const validIds = new Set(zones.map(z => z.id));
+    setRelations(prev => {
+      const filtered = prev.filter(r => validIds.has(r.from_zone) && validIds.has(r.to_zone));
+      return filtered.length === prev.length ? prev : filtered;
+    });
+  }, [zones]);
 
   // ============ Save Function ============
 
@@ -295,6 +351,9 @@ function ProjectWizard() {
           status: z.status,
           description: z.description,
         })),
+        // Drop self-loops at save time; UI surfaces an inline error but
+        // we never want them to reach the API.
+        spatial_relations: relations.filter(r => r.from_zone !== r.to_zone),
       };
 
       let savedProjectId: string;
@@ -712,70 +771,4 @@ function ProjectWizard() {
                           onChange={(e) => updateZone(zone.id, { description: e.target.value })}
                           placeholder="Description or current issues..."
                         />
-                      </FormControl>
-                      <Button
-                        size="sm"
-                        colorScheme="red"
-                        variant="ghost"
-                        onClick={() => removeZone(zone.id)}
-                      >
-                        Remove
-                      </Button>
-                    </HStack>
-                  </Box>
-                ))}
-              </VStack>
-            )}
-          </CardBody>
-        </Card>
-
-
-        {/* v4 / Module 11.3.3 — soft-required-fields warning. The 5 listed
-            fields aren't strictly required (only Project Name + at least one
-            Zone Name are blocking), but skipping them materially degrades
-            downstream LLM recommendations. The alert shows what's missing
-            and what each gap costs; the save button stays enabled. */}
-        {(() => {
-          const missing: string[] = [];
-          if (!koppenZone) missing.push('Köppen Climate Zone — Stage 1 transferability weighting');
-          if (!lczType) missing.push('Local Climate Zone (LCZ) — indicator baseline filtering');
-          if (!spaceType) missing.push('Space Type — Stage 4 IOM filtering');
-          if (!designBrief.trim()) missing.push('Design Brief — Stage 1 indicator recommendation prompt');
-          if (selectedDimensions.length === 0) missing.push('Performance Dimensions — Stage 1 indicator filter');
-          if (missing.length === 0) return null;
-          return (
-            <Alert status="warning" borderRadius="md" alignItems="flex-start">
-              <AlertIcon />
-              <Box>
-                <Text fontWeight="bold" fontSize="sm">
-                  Recommended fields are empty (save still allowed)
-                </Text>
-                <Text fontSize="xs" color="gray.700" mt={1}>
-                  These fields aren't strictly required, but leaving them blank
-                  materially affects downstream analysis quality:
-                </Text>
-                <Box as="ul" pl={4} mt={1} fontSize="xs">
-                  {missing.map((m, i) => (
-                    <Box as="li" key={i} listStyleType="disc">{m}</Box>
-                  ))}
-                </Box>
-              </Box>
-            </Alert>
-          );
-        })()}
-
-        {/* Action Buttons */}
-        <HStack justify="space-between">
-          <Button variant="outline" onClick={() => navigate('/projects')}>
-            Cancel
-          </Button>
-          <Button colorScheme="blue" size="lg" onClick={handleSave} isLoading={saving}>
-            {isEditMode ? 'Save & Continue' : 'Create & Continue'}
-          </Button>
-        </HStack>
-      </VStack>
-    </PageShell>
-  );
-}
-
-export default ProjectWizard;
+                    
