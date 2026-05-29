@@ -2125,6 +2125,84 @@ def chart_hdbscan_condensed_tree(zar: ZoneAnalysisResult) -> Optional[str]:
 
 
 # ============================================================================
+# Chart 22 — cluster stability (v6.2 bootstrap validation)
+# ============================================================================
+
+def chart_cluster_stability(zar: ZoneAnalysisResult) -> Optional[str]:
+    """Cluster validity — Hennig bootstrap per-cluster Jaccard stability.
+
+    Honest robustness reporting. Each bar is a cluster's mean Jaccard
+    similarity to its best match across 100 bootstrap resamples. Dashed
+    reference lines follow Hennig (2007): >=0.85 highly stable,
+    0.75-0.85 stable, 0.60-0.75 indicates a pattern, <0.60 unstable.
+    The Hopkins clustering-tendency statistic and the gap-statistic K are
+    reported in the caption so the reader can judge whether crisp
+    clusters exist at all, rather than reading the K-partition as a claim
+    of natural kinds.
+    """
+    cl = zar.clustering
+    if not cl or not cl.cluster_stability:
+        return None
+    arch = {a.archetype_id: a for a in (cl.archetype_profiles or [])}
+    items = sorted(cl.cluster_stability.items(), key=lambda kv: int(kv[0]))
+    if not items:
+        return None
+    cids = [int(k) for k, _ in items]
+    vals = [float(v) for _, v in items]
+    labels = []
+    for c in cids:
+        lbl = (arch[c].archetype_label if c in arch else "") or ""
+        labels.append(f"C{c}\n" + "\n".join(lbl.split(" / ")))
+
+    def _tier_color(v: float) -> str:
+        if v >= 0.85:
+            return SAGE
+        if v >= 0.75:
+            return NAVY
+        if v >= 0.60:
+            return MUSTARD
+        return BURGUNDY
+
+    fig, ax = plt.subplots(figsize=(max(7.4, 1.2 * len(cids) + 3.6), 4.4))
+    fig.subplots_adjust(left=0.09, right=0.97, top=0.82, bottom=0.32)
+    xs = np.arange(len(cids))
+    ax.bar(xs, vals, color=[_tier_color(v) for v in vals],
+           edgecolor="white", linewidth=0.6, width=0.68)
+    for x, v in zip(xs, vals):
+        ax.text(x, v + 0.02, f"{v:.2f}", ha="center", va="bottom",
+                fontsize=6.6, color=INK)
+    for y, lab in ((0.85, "0.85 highly stable"), (0.75, "0.75 stable"),
+                   (0.60, "0.60 pattern")):
+        ax.axhline(y, color=MUTE, linewidth=0.4, linestyle="--", alpha=0.7)
+        ax.text(len(cids) - 0.45, y + 0.01, lab, ha="right", va="bottom",
+                fontsize=5.4, color=MUTE, style="italic")
+    ax.set_xticks(xs)
+    ax.set_xticklabels(labels, fontsize=6.0)
+    ax.set_ylabel("Bootstrap Jaccard stability", fontsize=7.0)
+    ax.set_xlabel("Cluster archetype", fontsize=7.0)
+    ax.set_ylim(0, 1.06)
+    ax.spines["bottom"].set_color(LINE)
+    ax.spines["left"].set_color(LINE)
+    ax.grid(axis="y", color=HAIR, linewidth=0.3, alpha=0.6)
+
+    hop = cl.hopkins_statistic
+    gap_k = next((g["k"] for g in (cl.gap_statistic or [])
+                  if g.get("is_selected")), None)
+    cap = "Suppl. Fig. Cluster stability — Hennig bootstrap, 100 resamples."
+    if hop is not None:
+        cap += f" Hopkins tendency = {hop:.2f} (0.5 = no structure)."
+    if gap_k is not None:
+        cap += f" Gap-statistic K = {gap_k}; adopted partition K = {cl.k}."
+    _decorate(
+        fig, ax,
+        title="Cluster stability — bootstrap validation",
+        subtitle="Per-cluster mean Jaccard over 100 bootstrap resamples · dashed lines = Hennig stability bands",
+        caption=cap,
+    )
+    return _fig_to_svg(fig)
+
+
+# ============================================================================
 # Registry + public entry point
 # ============================================================================
 
@@ -2150,6 +2228,7 @@ CHART_FUNCS: dict[str, Any] = {
     "cluster-spatial-smoothing":        chart_cluster_spatial_smoothing,
     "archetype-radar":                  chart_archetype_radar,
     "cluster-size-distribution":        chart_cluster_size_distribution,
+    "cluster-stability":                chart_cluster_stability,
     "hdbscan-condensed-tree":           chart_hdbscan_condensed_tree,
 }
 
@@ -2174,6 +2253,7 @@ CHART_TITLES = {
     "cluster-spatial-smoothing":        "Cluster spatial smoothing",
     "archetype-radar":                  "Cluster radar profiles",
     "cluster-size-distribution":        "Cluster size distribution",
+    "cluster-stability":                "Cluster stability (bootstrap validation)",
     "hdbscan-condensed-tree":           "HDBSCAN condensed tree",
 }
 
@@ -2206,6 +2286,7 @@ CHART_MODES: dict[str, set[str]] = {
     "cluster-spatial-smoothing":      {"cluster"},
     "archetype-radar":                {"cluster"},
     "cluster-size-distribution":      {"cluster"},
+    "cluster-stability":              {"cluster"},
 }
 
 
@@ -2244,6 +2325,10 @@ def render_all(
         except Exception as e:
             logger.warning("nature_charts.render_all: %s raised %s", chart_id, e)
             svg = None
+            # A chart that raised after plt.figure()/subplots() but before
+            # _fig_to_svg() leaves its figure in pyplot's global registry; in
+            # the long-lived server these accumulate. Drop any orphaned figures.
+            plt.close("all")
         if svg:
             out[chart_id] = svg
     logger.info(

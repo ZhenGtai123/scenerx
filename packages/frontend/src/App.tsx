@@ -7,6 +7,7 @@ import theme from './theme';
 import StepIndicator from './components/StepIndicator';
 import GlobalPipelineProgress from './components/GlobalPipelineProgress';
 import SettingsDrawer from './components/SettingsDrawer';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import useAppStore from './store/useAppStore';
 import { getStageStatuses } from './utils/pipelineStatus';
 import api from './api';
@@ -262,27 +263,49 @@ function AppShell() {
       {/* Main content area */}
       <Box ml={SIDEBAR_W} flex={1} minH="100vh" minW={0} overflow="hidden">
         <GlobalPipelineProgress />
-        <Routes>
-          <Route path="/" element={<Dashboard />} />
-          <Route path="/projects" element={<Projects />} />
+        {/* v4.x — Top-level ErrorBoundary catches ANY unhandled render
+            crash in ANY route. Without this, a button click that triggers
+            a state mutation followed by a render crash (e.g. an
+            undefined-property access in a deeply-nested chart component,
+            a dismiss button revealing a previously-hidden subtree that
+            then throws, a panorama view switch racing with hydration)
+            takes the whole app to a white screen. The boundary keeps the
+            sidebar and header intact and shows a recoverable inline alert
+            in the content area, plus "Try to recover" and "Reload page"
+            buttons. Inner boundaries (e.g. the chart-grid boundary in
+            Reports.tsx) still catch first; this one is the last line of
+            defense.
 
-          {/* New project — step 1 of pipeline */}
-          <Route path="/projects/new" element={<NewProjectLayout />}>
-            <Route index element={<ProjectWizard />} />
-          </Route>
+            Keyed on pathname so navigating away from a crashed route
+            (sidebar link, browser back, etc.) auto-resets the boundary
+            instead of stubbornly keeping the error alert when the user
+            has already moved on. */}
+        <ErrorBoundary
+          label="this page"
+          key={`route-${pathname}`}
+        >
+          <Routes>
+            <Route path="/" element={<Dashboard />} />
+            <Route path="/projects" element={<Projects />} />
 
-          {/* 5-step pipeline: Project → Images → Prepare → Analysis → Report */}
-          <Route path="/projects/:projectId" element={<ProjectPipelineLayout />}>
-            <Route index element={<ProjectDetail />} />
-            <Route path="edit" element={<ProjectWizard />} />
-            <Route path="vision" element={<VisionAnalysis />} />
-            <Route path="analysis" element={<Analysis />} />
-            <Route path="reports" element={<Reports />} />
-          </Route>
+            {/* New project — step 1 of pipeline */}
+            <Route path="/projects/new" element={<NewProjectLayout />}>
+              <Route index element={<ProjectWizard />} />
+            </Route>
 
-          <Route path="/calculators" element={<Calculators />} />
-          <Route path="/settings" element={<Settings />} />
-        </Routes>
+            {/* 5-step pipeline: Project → Images → Prepare → Analysis → Report */}
+            <Route path="/projects/:projectId" element={<ProjectPipelineLayout />}>
+              <Route index element={<ProjectDetail />} />
+              <Route path="edit" element={<ProjectWizard />} />
+              <Route path="vision" element={<VisionAnalysis />} />
+              <Route path="analysis" element={<Analysis />} />
+              <Route path="reports" element={<Reports />} />
+            </Route>
+
+            <Route path="/calculators" element={<Calculators />} />
+            <Route path="/settings" element={<Settings />} />
+          </Routes>
+        </ErrorBoundary>
       </Box>
 
       <SettingsDrawer

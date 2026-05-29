@@ -98,6 +98,133 @@ def _safe_json(obj: Any) -> str:
     return json.dumps(obj, ensure_ascii=False, cls=_SafeJSONEncoder)
 
 
+# Closed enum of valid panorama view names. The Vision API's panorama
+# endpoint produces masks under these three view buckets exactly
+# (see services/vision_client.py:analyze_panorama). Keep in sync with the
+# frontend CheckboxGroup options.
+_PANORAMA_VIEW_NAMES = ("left", "front", "right")
+
+
+def _alias_panorama_masks(project, view: str) -> dict[str, dict[str, str]]:
+    """Rewrite every image's `mask_filepaths` in-place so that the standard
+    `semantic_map` / `depth_map` / etc. keys point at the requested view's
+    PNGs. Returns a snapshot of the original dicts so the caller can restore
+    them in a try/finally.
+
+    The Vision API saves panorama masks under prefixed keys
+    (`{view}_semantic_map`, `{view}_depth_map`, …). Every downstream
+    calculator and the indicator-filter logic in `_execute_project_pipeline`
+    look up the un-prefixed keys, so without this aliasing layer the entire
+    pipeline silently skips panorama-only images as `no_semantic_map`.
+
+    The aliasing is purely in-memory and lasts only for the duration of the
+    pipeline run; on disk the files keep their original prefixed-key
+    addressing, which is what every other surface (Vision Analysis preview,
+    mask ZIP download) consumes.
+    """
+    if view not in _PANORAMA_VIEW_NAMES:
+        raise ValueError(f"Unknown panorama view: {view!r}; expected one of {_PANORAMA_VIEW_NAMES}")
+    prefix = f"{view}_"
+    snapshot: dict[str, dict[str, str]] = {}
+    for img in project.uploaded_images:
+        snapshot[img.image_id] = dict(img.mask_filepaths)
+        rebuilt: dict[str, str] = {}
+        # Preserve every existing key (some entries — e.g. legacy projects —
+        # may carry a non-prefixed `semantic_map` even in panorama mode, and
+        # we don't want to drop it).
+        rebuilt.update(img.mask_filepaths)
+        # Then layer the view-specific keys on top, stripping the prefix.
+        # E.g. `left_semantic_map` → `semantic_map`. This overwrites any
+        # standard slot that happened to be set, which is the desired
+        # behaviour: the user asked for THIS view's run.
+        for key, path in img.mask_filepaths.items():
+            if key.startswith(prefix):
+                rebuilt[key[len(prefix):]] = path
+        img.mask_filepaths = rebuilt
+    return snapshot
+
+
+def _restore_panorama_masks(project, snapshot: dict[str, dict[str, str]]) -> None:
+    """Reverse `_alias_panorama_masks` by reinstating each image's original
+    `mask_filepaths` dict. Called in the `finally` of the pipeline run so a
+    pipeline crash mid-flight still leaves the project record clean.
+    """
+    for img in project.uploaded_images:
+        original = snapshot.get(img.image_id)
+        if original is not None:
+            img.mask_filepaths = original
+
+
+def _ensure_per_view_metrics(project) -> tuple[bool, str]:
+    """For panorama projects, force `img.metrics_results` to reflect the
+    project's `active_panorama_view` by restoring from
+    `panorama_view_results[view]["image_metrics"]`. Defensive — called at
+    the entrance of clustering endpoints so a stale or contaminated
+    in-memory `metrics_results` (e.g. last-pipeline-run leftovers) can never
+    leak into a per-view cluster computation.
+
+    Returns:
+        (ok, message):
+          ok=True if metrics are now per-view-correct (or project isn't
+          in panorama mode, in which case the shared metrics are the
+          source of truth);
+          ok=False if the project IS in panorama mode but the active view's
+          bucket has no `image_metrics` snapshot (i.e. the pipeline hasn't
+          been re-run since the per-view fix). Caller should surface the
+          message to the user as a "re-run pipeline first" prompt.
+    """
+    active_view = project.active_panorama_view
+    if not active_view:
+        # Non-panorama project — shared metrics are the only metrics, by design.
+        return True, ""
+    bucket = (project.panorama_view_results or {}).get(active_view) or {}
+    if "image_metrics" not in bucket:
+        return False, (
+            f"Panorama view {active_view!r} has no per-view metrics snapshot — "
+            "this view was pipelined before per-view isolation was enabled. "
+            "Re-run the project pipeline (it will populate the per-view metrics "
+            "bucket for every active view), then try clustering again."
+        )
+    view_image_metrics = bucket["image_metrics"] or {}
+    for img in project.uploaded_images:
+        img.metrics_results = dict(view_image_metrics.get(img.image_id) or {})
+
+    # Diagnostic log: sample the first image's first 3 indicator values for
+    # the active view, plus the same fingerprint for any OTHER view's bucket
+    # that has image_metrics. If the per-view buckets truly contain different
+    # data, these fingerprints will differ; if they're identical you'll see
+    # the same numbers across views (which means either the upstream Vision
+    # API returned identical per-view masks, or the pipeline aliasing leaked
+    # somewhere).
+    try:
+        first_img = next((img for img in project.uploaded_images if img.metrics_results), None)
+        if first_img:
+            indicator_keys = sorted([k for k in first_img.metrics_results.keys() if "__" not in k])[:3]
+            fingerprint = {k: round(float(first_img.metrics_results[k]), 4)
+                           for k in indicator_keys if first_img.metrics_results.get(k) is not None}
+            logger.info(
+                "[panorama-metrics] active_view=%s img=%s fingerprint=%s",
+                active_view, first_img.image_id, fingerprint,
+            )
+            # Compare against other views' buckets for visibility
+            for other_view, other_bucket in (project.panorama_view_results or {}).items():
+                if other_view == active_view:
+                    continue
+                other_metrics = (other_bucket or {}).get("image_metrics", {})
+                other_first = other_metrics.get(first_img.image_id) or {}
+                other_fp = {k: round(float(other_first[k]), 4)
+                            for k in indicator_keys if other_first.get(k) is not None}
+                same = (other_fp == fingerprint)
+                logger.info(
+                    "[panorama-metrics]   vs %s: fingerprint=%s identical=%s",
+                    other_view, other_fp, same,
+                )
+    except Exception as e:
+        logger.debug("[panorama-metrics] fingerprint logging failed: %s", e)
+
+    return True, ""
+
+
 # ---------------------------------------------------------------------------
 # Stage 2.5: Zone Statistics
 # ---------------------------------------------------------------------------
@@ -321,6 +448,18 @@ def run_clustering_by_project(
     project = projects_store.get(request.project_id)
     if not project:
         raise HTTPException(status_code=404, detail=f"Project not found: {request.project_id}")
+
+    # v4.x — Defensive per-view metrics restore. For panorama projects, force
+    # img.metrics_results to be the active view's per-view snapshot so a
+    # contaminated/shared in-memory state can't leak into clustering. If the
+    # active view's bucket has no image_metrics yet (pre-fix data), tell the
+    # user to re-run the pipeline — without per-view metrics, every Re-run
+    # clustering produces the SAME cluster regardless of which view they're
+    # on (since they all read the same shared metrics_results), which was
+    # exactly the "切视角 cluster 全一样" bug.
+    ok, msg = _ensure_per_view_metrics(project)
+    if not ok:
+        raise HTTPException(status_code=409, detail=msg)
 
     # Validate indicator_ids against loaded calculators
     valid_ids = [ind for ind in request.indicator_ids if manager.has_calculator(ind)]
@@ -680,6 +819,15 @@ def run_clustering_within_zones(
     project = projects_store.get(request.project_id)
     if not project:
         raise HTTPException(status_code=404, detail=f"Project not found: {request.project_id}")
+
+    # v4.x — Same defensive per-view restore as /clustering/by-project. See
+    # that endpoint's comment for the full rationale (without this, every
+    # within-zone Re-run on any panorama view produces the same clusters
+    # because img.metrics_results is shared).
+    ok, msg = _ensure_per_view_metrics(project)
+    if not ok:
+        raise HTTPException(status_code=409, detail=msg)
+
     if not project.spatial_zones or len(project.spatial_zones) < 2:
         raise HTTPException(
             status_code=400,
@@ -856,6 +1004,101 @@ def run_clustering_within_zones(
     for zone_id, sub_view in per_zone_analyses.items():
         views[f"within_zone:{zone_id}"] = sub_view
 
+    # v4.x — PER-VIEW CLUSTERING ATTACHMENT.
+    #
+    # Each per-view ZAR gets its own `.clustering` field so frontend
+    # consumers (ClusterCentroidHeatmap, SilhouettePlot, ClusterSizeChart,
+    # ArchetypeRadarChart, the k/silhouette badge, the per-view archetype
+    # chips, etc.) see drill-specific data when the user switches the
+    # "Showing" pill. Without this attachment, every consumer falls back to
+    # the project-level `clusteringResult.clustering` which is `first_cl`
+    # — only the first zone's HDBSCAN result — and the displayed cluster
+    # set is stuck on Zone 1 regardless of which drill is active.
+    #
+    # Attachment policy:
+    #   • within_zone:<zone_id>  → that zone's own HDBSCAN result.
+    #   • all_sub_clusters       → synthesized composite ClusteringResult
+    #                              with archetypes concatenated across all
+    #                              zones (re-IDed to be globally unique).
+    #                              k = sum of per-zone Ks; silhouette =
+    #                              weighted mean by point_count. Other
+    #                              fields (condensed_tree, dendrogram,
+    #                              etc.) are project-level constructs that
+    #                              don't translate to a "merged" view, so
+    #                              they're left empty — charts that depend
+    #                              on them simply won't render on the
+    #                              all_sub_clusters view, which is the
+    #                              correct UX (those charts visualise a
+    #                              single HDBSCAN run, not a concatenation).
+    #   • parent_zones           → no .clustering (parent zones are
+    #                              zone-level units, not clusters).
+    #
+    # The composite synthesis uses a deterministic re-id scheme:
+    # composite_id = sum(prior_zones' Ks) + local_archetype_id, so global
+    # IDs stay stable across re-runs as long as the iteration order of
+    # cluster_results_by_zone is stable (it is — dict preserves insertion
+    # order, which matches by_zone's traversal of project.uploaded_images).
+    for view_zone_id, sub_view in per_zone_analyses.items():
+        if view_zone_id in cluster_results_by_zone:
+            this_cl, _diag = cluster_results_by_zone[view_zone_id]
+            views[f"within_zone:{view_zone_id}"].clustering = this_cl
+
+    # Compose archetypes for all_sub_clusters by re-IDing per-zone profiles.
+    composite_archetypes: list = []
+    composite_k = 0
+    weighted_sil_sum = 0.0
+    weighted_sil_n = 0
+    for view_zone_id, (cl_i, _) in cluster_results_by_zone.items():
+        zone_name_str = zone_name_by_id_for(project, view_zone_id)
+        # Re-id with enumeration index (NOT prof.archetype_id) so composite IDs
+        # are globally unique. HDBSCAN can produce non-consecutive archetype_ids
+        # (e.g. [0, 1, 4] after noise stripping); using prof.archetype_id as the
+        # offset summand collided across zones (Zone A [0,1,4] + Zone B [0,1,2]
+        # with composite_k=3 yielded duplicate id 4 = 0+4 and 3+1), which
+        # triggered React duplicate-key warnings on the chip Wrap and the
+        # centroid heatmap rows. The original archetype_id is preserved in the
+        # label suffix when it differs from the enumeration index so users can
+        # trace back to the per-zone HDBSCAN output.
+        for idx, prof in enumerate(cl_i.archetype_profiles):
+            new_id = composite_k + idx
+            original_aid = int(prof.archetype_id)
+            label_core = prof.archetype_label or f"Cluster {original_aid}"
+            # Prefix the archetype label with its parent zone for clarity
+            # in the composite "All sub-clusters" view, e.g.
+            # "Road 1 · Low-Building / High-Tree" rather than just
+            # "Low-Building / High-Tree" (the latter would be ambiguous
+            # across zones).
+            composite_archetypes.append(type(prof)(
+                archetype_id=new_id,
+                archetype_label=f"{zone_name_str} · {label_core}",
+                point_count=prof.point_count,
+                centroid_values=dict(prof.centroid_values or {}),
+                centroid_z_scores=dict(prof.centroid_z_scores or {}),
+            ))
+        composite_k += len(cl_i.archetype_profiles)
+        if cl_i.silhouette_score:
+            n_in_zone = sum(p.point_count for p in cl_i.archetype_profiles)
+            weighted_sil_sum += cl_i.silhouette_score * n_in_zone
+            weighted_sil_n += n_in_zone
+    if composite_archetypes:
+        from app.models.analysis import ClusteringResult as _CR
+        composite_silhouette = weighted_sil_sum / weighted_sil_n if weighted_sil_n > 0 else 0.0
+        views["all_sub_clusters"].clustering = _CR(
+            method="within-zone composite (per-zone HDBSCAN concatenated)",
+            k=composite_k,
+            silhouette_score=round(composite_silhouette, 4),
+            silhouette_scores=[],
+            spatial_smooth_k=0,
+            layer_used=request.layer,
+            archetype_profiles=composite_archetypes,
+            spatial_segments=[],
+            point_ids_ordered=[],
+            point_lats=[], point_lngs=[],
+            labels_raw=[], labels_smoothed=[],
+            dendrogram_linkage=[],
+            condensed_tree=[],
+        )
+
     # Pick the first ClusteringResult for the response's `clustering` field
     # (frontend expects a single object). Frontend will treat the composite
     # zone_analysis as the source of truth for charts.
@@ -866,6 +1109,32 @@ def run_clustering_within_zones(
         request.project_id, n_zones_clustered, n_zones_too_small, n_total_points,
         list(views.keys()),
     )
+
+    # v4.x — Persist the multi-view dict alongside cluster_view/clustering
+    # so switching panorama view and coming back doesn't lose the within-zone
+    # state. Same pattern as cluster_view persistence above: stash under a
+    # sub-key of zone_analysis_result, which the per-view panorama mirror
+    # carries along when the user switches panorama views.
+    try:
+        if project.zone_analysis_result is None:
+            project.zone_analysis_result = {}
+        project.zone_analysis_result["analysis_views"] = {
+            view_id: zar.model_dump() for view_id, zar in views.items()
+        }
+        # Also stash the composite as cluster_view + clustering for backward
+        # compat with the single-cluster persistence path (the frontend
+        # already knows how to read these from zone_analysis_result).
+        project.zone_analysis_result["cluster_view"] = composite_analysis.model_dump()
+        project.zone_analysis_result["clustering"] = first_cl.model_dump()
+        projects_store.save(project)
+        logger.info(
+            "Within-zone clustering persisted to project %s (views=%s)",
+            project.id, list(views.keys()),
+        )
+    except Exception as e:
+        # Non-fatal — response still goes through; just won't survive a
+        # panorama view round-trip.
+        logger.error("Failed to persist within-zone clustering to project: %s", e, exc_info=True)
 
     return ClusteringResponse(
         clustering=first_cl,
@@ -1104,11 +1373,16 @@ async def generate_design_strategies_stream(
         task = asyncio.create_task(runner())
         # initial "started" event so the client can render the progress bar
         # immediately instead of waiting for the first per-unit step.
-        unit_total = len(
-            request.zone_analysis.segment_diagnostics
-            or request.zone_analysis.zone_diagnostics
-            or []
-        )
+        # Honor the requested view — segment_diagnostics is the unit list
+        # only for cluster-derived views. In zone view it may still be
+        # populated (clustering persists it at the top level of
+        # zone_analysis_result for chart rendering), so counting it here
+        # would make the zone-view progress bar show cluster archetypes.
+        _za = request.zone_analysis
+        if _za.segment_diagnostics and request.grouping_mode == "clusters":
+            unit_total = len(_za.segment_diagnostics)
+        else:
+            unit_total = len(_za.zone_diagnostics or [])
         yield {"type": "started", "unit_total": unit_total}
 
         try:
@@ -1392,6 +1666,41 @@ async def _execute_project_pipeline(
         yield {"type": "error", "message": f"Project not found: {request.project_id}"}
         return
 
+    # v4.x — Panorama per-view scoping. If the caller supplied a `panorama_view`,
+    # validate it against the project's user-selected `active_panorama_views`
+    # and alias the view's prefixed masks back to the standard slots that
+    # every calculator below expects. Mask state is restored in the finally
+    # of the outer pipeline `try` (see end of this function).
+    panorama_view = (request.panorama_view or "").strip() or None
+    panorama_mask_snapshot: Optional[dict[str, dict[str, str]]] = None
+    if panorama_view is not None:
+        if panorama_view not in _PANORAMA_VIEW_NAMES:
+            yield {"type": "error", "message": (
+                f"Invalid panorama_view {panorama_view!r}; "
+                f"expected one of {list(_PANORAMA_VIEW_NAMES)}"
+            )}
+            return
+        # The user must have ticked this view in Vision Analysis. Running a
+        # view that's not in active_panorama_views would silently produce a
+        # report the user never asked for and orphan it on the Reports page
+        # (the segmented control wouldn't surface it).
+        if panorama_view not in (project.active_panorama_views or []):
+            yield {"type": "error", "message": (
+                f"Panorama view {panorama_view!r} is not in the project's "
+                f"active_panorama_views {project.active_panorama_views!r}. "
+                "Enable the view in Vision Analysis before running its pipeline."
+            )}
+            return
+        try:
+            panorama_mask_snapshot = _alias_panorama_masks(project, panorama_view)
+        except ValueError as e:
+            yield {"type": "error", "message": str(e)}
+            return
+        logger.info(
+            "Pipeline running with panorama_view=%s; aliased %d images' mask_filepaths in-memory",
+            panorama_view, len(panorama_mask_snapshot),
+        )
+
     # 2. Validate indicator_ids
     valid_ids = [ind for ind in request.indicator_ids if manager.has_calculator(ind)]
     if not valid_ids:
@@ -1469,7 +1778,20 @@ async def _execute_project_pipeline(
         # etc. produce values that looked identical across the 1254-image
         # West Lake project. We pass photo_path alongside image_path so
         # each calculator can pick the one it actually needs.
-        photo_path = img.filepath
+        #
+        # PER-VIEW FIX: use the vision stage's `original` layer. For panorama
+        # projects _alias_panorama_masks() has already mapped the current
+        # view's `{view}_original` crop onto this `original` slot; for
+        # non-panorama projects it is simply the single street view's `original`
+        # copy. Either way it matches the per-view masks at the vision stage's
+        # native resolution. Every vision-processed image has `original` (it is
+        # saved alongside semantic_map, and this loop only runs on images that
+        # have semantic_map), so there is NO fallback to img.filepath — that raw
+        # upload is the full 2048x1024 equirectangular panorama for panorama
+        # projects and must never be read here. If `original` were ever absent,
+        # photo_path stays None and photo-reading calculators degrade to the
+        # semantic map internally (src = original_photo_path or semantic_map).
+        photo_path = img.mask_filepaths.get("original")
         # v8.0 — also expose the depth map (Depth Anything output, grayscale)
         # for indicators that compute distance/depth statistics, not class
         # ratios. Mapped by the vision pipeline alongside semantic_map.
@@ -1584,6 +1906,20 @@ async def _execute_project_pipeline(
         # Yield control back to the event loop so SSE events actually flush
         # (calculator.calculate is synchronous and CPU-bound).
         await asyncio.sleep(0)
+
+    # v4.x — Restore aliased panorama masks BEFORE the first save below.
+    # The per-image calc loop above is the ONLY consumer of mask_filepaths;
+    # everything downstream (aggregation, zone analysis) reads metrics_results.
+    # If we persist while masks are still aliased, the view-specific paths get
+    # written into the standard slots (semantic_map/original/...) and corrupt
+    # the project record on any path that doesn't reach the later restore —
+    # e.g. an exception in aggregation, or a run where zone analysis is skipped
+    # so the end-of-function persist block never executes. Restoring here makes
+    # both saves persist the original (prefixed-key) addressing. The later
+    # restore block becomes a no-op (snapshot consumed -> None).
+    if panorama_mask_snapshot is not None:
+        _restore_panorama_masks(project, panorama_mask_snapshot)
+        panorama_mask_snapshot = None
 
     # Persist calculated metrics to SQLite
     if calc_ok > 0:
@@ -1713,6 +2049,26 @@ async def _execute_project_pipeline(
         # Shallow copy + replace image_records with [] only for the SSE copy.
         za_for_sse = {**za_full, "image_records": []}
 
+    # v4.x — Restore aliased panorama masks BEFORE any save. This restore is
+    # the load-bearing invariant for the per-view feature: every code path
+    # that calls projects_store.save(project) downstream MUST be reached
+    # only after this line runs, otherwise SQLite would persist a
+    # `mask_filepaths` dict where the standard `semantic_map` key points at
+    # a view-prefixed path (corrupting the project record for all subsequent
+    # runs). Today the only save call below sits in the persist block guarded
+    # by zone_result/design_result presence, so the invariant holds.
+    #
+    # We deliberately don't wrap the upstream compute in try/finally:
+    # ProjectStore.get() reads fresh from SQLite on every request (see
+    # db/project_store.py:40-46), so an exception that aborts the pipeline
+    # before this restore runs can't leak aliased state across requests —
+    # the in-memory project simply goes out of scope and the next request
+    # rehydrates from the untouched SQLite row.
+    if panorama_mask_snapshot is not None:
+        _restore_panorama_masks(project, panorama_mask_snapshot)
+        # Mark consumed so a stray future code path can't double-restore.
+        panorama_mask_snapshot = None
+
     # Persist analysis artefacts onto the project so they survive page reloads
     # and project switches. Stored as the same dicts the frontend consumes.
     if zone_result is not None or design_result is not None:
@@ -1728,6 +2084,44 @@ async def _execute_project_pipeline(
         project.ai_reports = {}
         project.ai_report_metas = {}
         project.analysis_results_updated_at = datetime.now()
+        # v4.x — Panorama per-view mirror. If this run was scoped to a panorama
+        # view, ALSO stash the freshly-computed top-level slots into the
+        # view's bucket in `panorama_view_results`, and mark the project's
+        # `active_panorama_view` so the Reports page lands on the view the
+        # user just ran. Other views' buckets stay untouched — that's the
+        # "每个视角独立" guarantee: running the front view doesn't disturb
+        # whatever the user has already computed for left or right.
+        if panorama_view is not None:
+            # NOTE: We deliberately do NOT mirror `selected_indicators` per
+            # view. That field is a USER-level setting (which indicators the
+            # user wants in the current session), not a per-view pipeline
+            # output. Mirroring it would stomp the user's live selection
+            # whenever they switch back to a previously-run view.
+            #
+            # `image_metrics` IS per-view: it's the freshly-computed
+            # img.metrics_results from THIS view's pipeline run. Snapshot it
+            # by image_id so the view-switch restore can put each image's
+            # per-view metrics back onto img.metrics_results before clustering
+            # (or any other downstream consumer that reads metrics_results
+            # directly) runs. Without this, clustering would always operate
+            # on the LAST pipeline run's metrics, ignoring the active view —
+            # the "Cluster view 跨视角数据相同" bug.
+            project.panorama_view_results[panorama_view] = {
+                "zone_analysis_result": project.zone_analysis_result,
+                "ai_reports": dict(project.ai_reports),
+                "ai_report_metas": dict(project.ai_report_metas),
+                "design_strategy_results": dict(project.design_strategy_results),
+                "analysis_results_updated_at": (
+                    project.analysis_results_updated_at.isoformat()
+                    if project.analysis_results_updated_at else None
+                ),
+                "image_metrics": {
+                    img.image_id: dict(img.metrics_results)
+                    for img in project.uploaded_images
+                    if img.metrics_results
+                },
+            }
+            project.active_panorama_view = panorama_view
         projects_store.save(project)
 
     # SSE event uses the stripped copy of zone_analysis (image_records=[])
@@ -1747,7 +2141,7 @@ async def run_project_pipeline(
     manager: MetricsManager = Depends(get_metrics_manager),
     _user: UserResponse = Depends(get_current_user),
 ):
-    """Run the full project pipeline: per-image calculations → aggregate → Stage 2.5 → Stage 3."""
+    """Run the full project pipeline."""
     final_result: Optional[dict] = None
     async for event in _execute_project_pipeline(request, analyzer, engine, calculator, manager):
         if event.get("type") == "error":
@@ -1772,13 +2166,7 @@ async def run_project_pipeline_stream(
     manager: MetricsManager = Depends(get_metrics_manager),
     _user: UserResponse = Depends(get_current_user),
 ):
-    """Stream project pipeline progress via Server-Sent Events.
-
-    Emits one ``progress`` event per processed image (so users can see a
-    live counter during multi-hour batch runs), plus ``status`` events for
-    each pipeline stage boundary, and a final ``result`` event carrying the
-    complete ProjectPipelineResult.
-    """
+    """Stream project pipeline progress via Server-Sent Events."""
     async def event_generator():
         try:
             async for event in _execute_project_pipeline(request, analyzer, engine, calculator, manager):

@@ -723,7 +723,10 @@
         "note": "Observed IOM signatures extend beyond the canonical representational scope; this indicator requires explicit operational-lever annotation."
       },
       "unit": "%",
-      "target_direction": "NEUTRAL"
+      "target_direction": "NEUTRAL",
+      "status": "active",
+      "view_note": "Per-view DIRECTIONAL pixel ratio on the cropped view (left/front/right); NOT the hemispherical view factor its name implies. For a panorama-level estimate, aggregate the three views (area-weighted mean).",
+      "view_scope": "per_view_directional"
     },
     "IND_TVF": {
       "name": "Tree View Factor",
@@ -842,7 +845,10 @@
       },
       "formula_source": "Cai et al., 2023",
       "unit": "ratio (0-1)",
-      "target_direction": "INCREASE"
+      "target_direction": "INCREASE",
+      "status": "active",
+      "view_note": "Per-view DIRECTIONAL pixel ratio on the cropped view (left/front/right); NOT the hemispherical view factor its name implies. For a panorama-level estimate, aggregate the three views (area-weighted mean).",
+      "view_scope": "per_view_directional"
     },
     "IND_BVI": {
       "name": "Building View Index",
@@ -2252,7 +2258,9 @@
         "note": "Observed IOM signatures extend beyond the canonical representational scope; this indicator requires explicit operational-lever annotation."
       },
       "unit": "ratio (0-1)",
-      "target_direction": "INCREASE"
+      "target_direction": "INCREASE",
+      "status": "future_development",
+      "view_note": "Deferred from indicator recommendation: definition requires an input the per-view street crop does not provide (DSM/building-model simulation, bird-eye/top view, fisheye skydome + sun-path, or a surrounding street network). Per-view value would approximate a different quantity. Retained as a future-development indicator."
     },
     "IND_GIN": {
       "name": "Gini Index",
@@ -3034,7 +3042,9 @@
         "note": "Observed IOM signatures extend beyond the canonical representational scope; this indicator requires explicit operational-lever annotation."
       },
       "unit": "ratio (0-1)",
-      "target_direction": "INCREASE"
+      "target_direction": "INCREASE",
+      "status": "future_development",
+      "view_note": "Deferred from indicator recommendation: definition requires an input the per-view street crop does not provide (DSM/building-model simulation, bird-eye/top view, fisheye skydome + sun-path, or a surrounding street network). Per-view value would approximate a different quantity. Retained as a future-development indicator."
     },
     "IND_SVF_DEC": {
       "name": "Sky View Factor Decrease",
@@ -3118,7 +3128,9 @@
         "note": "Observed operational scope stays within the canonical representational scope."
       },
       "unit": "ratio (0-1)",
-      "target_direction": "INCREASE"
+      "target_direction": "INCREASE",
+      "status": "future_development",
+      "view_note": "Deferred from indicator recommendation: definition requires an input the per-view street crop does not provide (DSM/building-model simulation, bird-eye/top view, fisheye skydome + sun-path, or a surrounding street network). Per-view value would approximate a different quantity. Retained as a future-development indicator."
     },
     "IND_BEA_VIS": {
       "name": "Visual Beauty Score",
@@ -3730,7 +3742,9 @@
         "note": "Observed IOM signatures extend beyond the canonical representational scope; this indicator requires explicit operational-lever annotation."
       },
       "unit": "ratio (0-1)",
-      "target_direction": "NEUTRAL"
+      "target_direction": "NEUTRAL",
+      "status": "future_development",
+      "view_note": "Deferred from indicator recommendation: definition requires an input the per-view street crop does not provide (DSM/building-model simulation, bird-eye/top view, fisheye skydome + sun-path, or a surrounding street network). Per-view value would approximate a different quantity. Retained as a future-development indicator."
     },
     "IND_BRT": {
       "name": "Perceived Brightness Score",
@@ -4234,7 +4248,10 @@
         "note": "Observed IOM signatures extend beyond the canonical representational scope; this indicator requires explicit operational-lever annotation."
       },
       "unit": "dimensionless",
-      "target_direction": "INCREASE"
+      "target_direction": "INCREASE",
+      "status": "active",
+      "view_note": "Composite index: a weighted combination of sub-indicators (not a direct image measurement). Retained as recommendable; its output is only as meaningful as the sub-indices that are actually computed.",
+      "view_scope": "composite"
     },
     "IND_VSD": {
       "name": "Vegetation Structural Diversity",
@@ -4782,7 +4799,9 @@
         "note": "Observed operational scope stays within the canonical representational scope."
       },
       "unit": "dimensionless [0,1]",
-      "target_direction": "INCREASE"
+      "target_direction": "INCREASE",
+      "status": "future_development",
+      "view_note": "Deferred from indicator recommendation: definition requires an input the per-view street crop does not provide (DSM/building-model simulation, bird-eye/top view, fisheye skydome + sun-path, or a surrounding street network). Per-view value would approximate a different quantity. Retained as a future-development indicator."
     },
     "IND_DIR_RAT": {
       "name": "Dirt Ratio",
@@ -5451,7 +5470,10 @@
       },
       "note_on_generality": "Composite Street Quality Index using paper-specific regression coefficients (1.507, 0.692, 0.447, ..., 7.798, -6.344). These weights are derived from the source authors' specific dataset and city, not universal. To use IND_SQI in a new context, either (a) re-fit weights using the same 12 component indicators with a comparable training sample, or (b) treat as a literature benchmark and develop a context-specific composite.",
       "unit": "dimensionless",
-      "target_direction": "INCREASE"
+      "target_direction": "INCREASE",
+      "status": "active",
+      "view_note": "Composite index: a weighted combination of sub-indicators (not a direct image measurement). Retained as recommendable; its output is only as meaningful as the sub-indices that are actually computed.",
+      "view_scope": "composite"
     },
     "IND_FAC_ENC": {
       "name": "Facade Enclosure Type",
@@ -6756,7 +6778,9 @@
       "input_data_requirements": "RGB + semantic segmentation (tree/ceiling/canopy)",
       "tier": "Tier 1",
       "unit": "degrees",
-      "target_direction": "NEUTRAL"
+      "target_direction": "NEUTRAL",
+      "status": "future_development",
+      "view_note": "Deferred from indicator recommendation: definition requires an input the per-view street crop does not provide (DSM/building-model simulation, bird-eye/top view, fisheye skydome + sun-path, or a surrounding street network). Per-view value would approximate a different quantity. Retained as a future-development indicator."
     },
     "IND_MTD": {
       "name": "Motorization Degree",
@@ -7222,7 +7246,7 @@
       "target_direction": "NEUTRAL"
     },
     "IND_FG_ERI": {
-      "name": "Foreground Edge Roughness Index (S_ERI)",
+      "name": "S_ERI",
       "definition": "A shape metric describing the irregularity of the foreground outline derived from semantic-segmented street/scenic images, based on the isoperimetric inequality. Compares the perimeter of the foreground region to the square root of its area; values near sqrt(2*pi) indicate circular outlines, values near 1 indicate square outlines, and larger values indicate increasingly irregular shapes.",
       "category": "CAT_CFG",
       "formula": "S_ERI = 0.25 * P / sqrt(A)",
@@ -7316,7 +7340,7 @@
       "target_direction": "NEUTRAL"
     },
     "IND_FG_ECI": {
-      "name": "Foreground Edge Contrast Index (S_ECI)",
+      "name": "S_ECI",
       "definition": "Measures how distinct the foreground is from its surrounding elements by checking element-label consistency of the 8-neighborhood for each pixel on the foreground outline. Values near 0 indicate the foreground is sharply distinguished from its surroundings; values near 1 indicate it blends with neighbors.",
       "category": "CAT_CFG",
       "formula": "S_ECI = Pb / (Py + Pb)",
@@ -7410,7 +7434,7 @@
       "target_direction": "NEUTRAL"
     },
     "IND_FG_PSI": {
-      "name": "Foreground Hole-Shape Similarity Index (S_PSI)",
+      "name": "S_PSI",
       "definition": "A distributional trend metric describing how similar in shape the multiple holes (open patches inside the foreground) are. Computed as the coefficient of variation of the perimeter-area shape descriptor (0.25*Pi/sqrt(Ai)) across all N holes. Zero means all holes are similar in shape; larger values mean increasingly dissimilar hole shapes.",
       "category": "CAT_CFG",
       "formula": "S_PSI = sqrt( (1/N) * sum_i ( (0.25*Pi/sqrt(Ai)) - mu )^2 ) / mu , where mu = (1/N) sum_i (0.25*Pi/sqrt(Ai))",
@@ -7506,7 +7530,7 @@
       "target_direction": "NEUTRAL"
     },
     "IND_FG_API": {
-      "name": "Foreground Asymmetry / Profile Index (S_API)",
+      "name": "S_API",
       "definition": "A distributional-trend metric describing the lateral asymmetry of the foreground outline relative to the vertical midline of the field of view, computed as the standard deviation of the per-row midpoints of the foreground outline's left/right pixel pairs about the field-of-view midline. Higher values indicate stronger left/right asymmetry of the foreground silhouette. (Lan et al. 2025, npj Heritage Science, Table 1)",
       "category": "CAT_CFG",
       "formula": "S_API = sqrt( (1/N) * Sum_{i=1..N} (P_i - mu)^2 )",
@@ -7603,7 +7627,7 @@
       "target_direction": "NEUTRAL"
     },
     "IND_FG_ADI": {
-      "name": "Foreground Largest-Hole Asymmetry Index (S_ADI)",
+      "name": "S_ADI",
       "definition": "A relative-relationship metric capturing whether one hole inside the foreground dominates the others in size. Equal to (SDi - SDj)/SDi, where SDi is the standard deviation of all hole areas including the largest one and SDj is the standard deviation excluding the largest. Zero indicates the largest hole is similar in size to the rest; one indicates the largest hole dominates.",
       "category": "CAT_CFG",
       "formula": "S_ADI = (SDi - SDj) / SDi ; SDi = sqrt((1/N)*sum_i(Ai - mu_i)^2) ; SDj = sqrt((1/N)*sum_{i!=max}(Ai - mu_w)^2)",
@@ -8152,7 +8176,7 @@
       "target_direction": "NEUTRAL"
     },
     "IND_FG_DEPTH_LV": {
-      "name": "Foreground Maximum Depth Value (P_LV)",
+      "name": "P_LV",
       "definition": "An absolute-value position metric: the maximum depth value across all pixels in the foreground, derived from monocular depth estimation grayscale (1-256). High values mean the foreground starts close to the observer; low values mean the foreground starts far from the observer.",
       "category": "CAT_CFG",
       "formula": "P_LV = max_{i in Foreground} Di",
@@ -8245,7 +8269,7 @@
       "target_direction": "NEUTRAL"
     },
     "IND_FG_DEPTH_LN": {
-      "name": "Foreground Vertical Depth Length (P_LN)",
+      "name": "P_LN",
       "definition": "An absolute-value position metric: the count of unique non-repeating depth values among pixels in the foreground, representing the vertical depth extent (range) of the foreground.",
       "category": "CAT_CFG",
       "formula": "P_LN = sum_{i=1..N} Unique(Di)",
@@ -8340,7 +8364,7 @@
       "target_direction": "NEUTRAL"
     },
     "IND_FG_DEPTH_ECI": {
-      "name": "Foreground Depth Continuity Index (P_ECI)",
+      "name": "P_ECI",
       "definition": "A distributional trend metric measuring how smoothly depth values transition across the foreground. Computed as the coefficient of variation of the per-row/column coefficients of variation of the absolute differences between depth values of neighboring-pixel pairs. Zero means depth values are continuously consistent; larger values mean abrupt depth jumps.",
       "category": "CAT_CFG",
       "formula": "P_ECI = sqrt( (1/N) * sum_j (CV_j - mu_CV)^2 ) / mu_CV ; CV_j = sqrt((1/Mj)*sum_i(Cij - mu_j)^2) / mu_j ; Cij = |idx_i - idx_{i+1}|",

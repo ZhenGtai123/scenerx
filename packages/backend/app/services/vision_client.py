@@ -336,7 +336,13 @@ class VisionModelClient:
                 err = VisionAnalysisResponse(status="error", error=f"Image file not found: {image_path}")
                 return {"left": err, "front": err, "right": err}
 
-            semantic_colors = self._generate_colors_for_classes(len(request.semantic_classes))
+            # Use the REAL per-class colours from Semantic_configuration.json
+            # (same as analyze_image), so the per-view semantic_map is rendered
+            # with the exact RGB the downstream calculators match against. The
+            # previous _generate_colors_for_classes() produced synthetic colours
+            # by count, which did NOT match the calculators' TARGET_RGB and made
+            # panorama indicators compute against the wrong palette.
+            semantic_colors = self._colors_for_selected_classes(request.semantic_classes)
 
             request_data = {
                 "image_id": request.image_id or f"img_{int(time.time() * 1000)}",

@@ -130,6 +130,13 @@ class ClusteringService:
         # size — too small fragments into many tiny clusters; too large misses
         # legitimate small archetypes. Heuristic: 5 % of N, clamped to [5, 20].
         n = len(X)
+
+        # ── v6.2 cluster-validity — Hopkins clustering-tendency on the
+        # standardised matrix, computed once BEFORE any partition is
+        # selected so the pipeline never imposes archetypes on data that
+        # has no cluster structure. ──
+        hopkins = self._hopkins_statistic(X)
+
         min_cluster_size = max(5, min(20, int(n * 0.05)))
         min_samples = max(3, min_cluster_size // 2)
 
@@ -178,7 +185,13 @@ class ClusteringService:
             best_k, best_score, labels, kmeans_scores = self._find_optimal_k(X, max_k)
             silhouette_scores = kmeans_scores
             n_clusters = best_k
-            hdb_method = f"KMeans (GMM-fallback, multi-criterion k={best_k})"
+            hdb_method = f"KMeans (GMM-fallback, silhouette-gated k={best_k})"
+
+        # ── v6.2 cluster-validity — Tibshirani gap statistic over the
+        # K-sweep, reported as an independent K-validity criterion
+        # alongside silhouette / BIC. Diagnostic only: it does NOT
+        # override the primary K selection above.
+        gap_diagnostic = self._gap_statistic(X, k_range=(2, MAX_K_TRY))
 
         # Final aggregate silhouette (single number for the badge in UI)
         try:
@@ -209,6 +222,12 @@ class ClusteringService:
         # as v6.0 — wipes salt-and-pepper specks but preserves cluster shape.
         has_coords = coords is not None and len(coords) == len(labels)
         labels_raw = labels.copy()
+
+        # ── v6.2 cluster-validity — Hennig bootstrap stability of the
+        # feature-space partition, measured on the pre-smoothing labels.
+        cluster_stability = self._bootstrap_cluster_stability(
+            X, labels_raw, n_clusters)
+
         if has_coords and knn_k > 0 and len(labels) > knn_k:
             labels = self._knn_smooth(coords, labels, knn_k)
             logger.info("KNN smoothing applied (k=%d)", knn_k)
@@ -254,6 +273,12 @@ class ClusteringService:
             noise_count=int(noise_mask.sum()),
             noise_point_ids=noise_point_ids,
             condensed_tree=condensed_tree,
+            hopkins_statistic=round(float(hopkins), 4),
+            gap_statistic=gap_diagnostic,
+            cluster_stability=cluster_stability,
+            cluster_stability_method=(
+                "Hennig bootstrap · 100 resamples · KMeans · per-cluster max Jaccard"
+            ),
         ), segment_diagnostics
 
     # ------------------------------------------------------------------
@@ -438,20 +463,26 @@ class ClusteringService:
         X: np.ndarray,
         max_k: int,
     ) -> tuple[int, float, np.ndarray, list[dict]]:
-        """KMeans K-sweep with HONEST K selection.
+        """KMeans K-sweep with silhouette-gated K selection (v6.2).
 
-        We compute three internal-validity criteria per K:
-          - silhouette   (higher = better separation; biased toward small K)
-          - Davies-Bouldin  (lower = better; less biased than silhouette)
-          - Calinski-Harabasz (higher = better; rewards compact + separated)
+        Three internal-validity criteria are computed per K:
+          - silhouette        (higher = better; the ONLY one of the three
+                               with an ABSOLUTE interpretation — >=0.5 strong,
+                               0.25-0.5 weak/overlapping, <=0.25 no structure)
+          - Davies-Bouldin    (lower = better; RELATIVE — no absolute scale)
+          - Calinski-Harabasz (higher = better; RELATIVE — no absolute scale)
 
-        K is chosen by majority vote across the three criteria. This avoids
-        the well-known silhouette bias toward K=2 while still letting K=2
-        win when it's genuinely best across all three.
-
-        Returns the silhouette curve in `all_scores` for the front-end chart
-        (the chart name says silhouette, so we keep silhouette as the
-        displayed metric — but the K winner uses the full ensemble).
+        K is decided by SILHOUETTE, because it is the only criterion that can
+        say whether a partition is meaningful at all. Davies-Bouldin and
+        Calinski-Harabasz are relative indices: on near-continuous data they
+        always nominate some K, and an earlier multi-criterion vote let them
+        override silhouette into a worse-separated partition (e.g. selecting
+        K=6 at silhouette 0.19 when the silhouette peak was K=3 at 0.28).
+        They are now used only to break ties between K values whose
+        silhouette is within `sil_tol` of the peak, and are reported in
+        `all_scores` for transparency. When the silhouette peak itself is
+        <= 0.25 every row is flagged `low_structure=True` so downstream text
+        can state honestly that the data has no rich cluster structure.
         """
         from sklearn.metrics import davies_bouldin_score, calinski_harabasz_score
         n = len(X)
@@ -486,28 +517,31 @@ class ClusteringService:
         if not per_k_sil:
             return 2, -1.0, np.zeros(n, dtype=int), all_scores
 
-        # Each criterion votes for its best K. Final K = mode of votes,
-        # ties broken by silhouette. This is the "honest" K — no flooring.
-        vote_sil = max(per_k_sil, key=per_k_sil.get)
-        vote_db = min(per_k_db, key=per_k_db.get)   # lower DB = better
-        vote_ch = max(per_k_ch, key=per_k_ch.get)
-        votes = [vote_sil, vote_db, vote_ch]
-        from collections import Counter
-        vote_counts = Counter(votes)
-        most_common = vote_counts.most_common()
-        if most_common[0][1] >= 2:
-            best_k = most_common[0][0]
+        # ── v6.2 silhouette-gated selection ──
+        # Silhouette decides K. Davies-Bouldin / Calinski-Harabasz only break
+        # ties between K values whose silhouette is statistically
+        # indistinguishable from the peak (within sil_tol).
+        sil_tol = 0.02
+        peak_sil = max(per_k_sil.values())
+        contenders = [k for k, s in per_k_sil.items() if peak_sil - s <= sil_tol]
+        if len(contenders) == 1:
+            best_k = contenders[0]
         else:
-            # All three disagree (3-way split). Default to silhouette (the
-            # criterion the user sees on the chart) — most defensible.
-            best_k = vote_sil
+            # tie-break among silhouette-equivalent K: lowest Davies-Bouldin
+            best_k = min(contenders, key=lambda k: per_k_db[k])
+        # peak silhouette <= 0.25 -> no rich cluster structure; any K is then
+        # a descriptive segmentation of a continuum, not a set of natural kinds.
+        low_structure = peak_sil <= 0.25
 
-        # Record the rationale for downstream transparency
+        vote_sil = max(per_k_sil, key=per_k_sil.get)
+        vote_db = min(per_k_db, key=per_k_db.get)
+        vote_ch = max(per_k_ch, key=per_k_ch.get)
         for row in all_scores:
             row["vote_silhouette"] = (row["k"] == vote_sil)
             row["vote_davies_bouldin"] = (row["k"] == vote_db)
             row["vote_calinski_harabasz"] = (row["k"] == vote_ch)
             row["is_selected"] = (row["k"] == best_k)
+            row["low_structure"] = low_structure
 
         return best_k, per_k_sil[best_k], per_k_labels[best_k], all_scores
 
@@ -516,22 +550,26 @@ class ClusteringService:
         X: np.ndarray,
         k_range: tuple[int, int] = (2, 8),
     ) -> tuple[int, float, np.ndarray | None, list[dict]]:
-        """Gaussian Mixture clustering with BIC-selected K (single primary method).
+        """Gaussian Mixture clustering with silhouette-gated, BIC-arbitrated K.
 
         Returns
         -------
-        best_k          : int       — K chosen by minimum BIC
+        best_k          : int       — K selected by the silhouette gate (BIC breaks ties)
         best_silhouette : float     — silhouette at the chosen K (for UI badge)
         best_labels     : np.ndarray| None — cluster assignments, None on failure
         diagnostic      : list[dict] — per-K metrics for the silhouette-curve chart:
             [{"k": int, "bic": float, "silhouette": float, "log_likelihood": float,
               "is_selected": bool}, ...]
 
-        BIC is the standard model-selection criterion for finite mixture
-        models (Schwarz 1978). It approximates the log of the Bayes factor,
-        with an explicit complexity penalty of (k * params_per_component *
-        log(n)) / 2 — so it discourages overfitting without an arbitrary
-        manual floor.
+        BIC (Schwarz 1978) is the standard model-selection criterion for
+        finite mixture models, but on a continuous streetscape gradient it
+        keeps adding mixture components whenever the likelihood gain beats
+        its complexity penalty — carving a structureless cloud into
+        separation-free slivers. v6.2 therefore gates K on the silhouette
+        coefficient (the only absolute-scale validity index): among the K
+        values whose silhouette sits within ``sil_tol`` of the peak, BIC
+        arbitrates (lower = better). This keeps the GMM-BIC path as honest
+        about weak structure as the KMeans fallback's ``_find_optimal_k``.
         """
         n = len(X)
         lo, hi = k_range
@@ -571,8 +609,28 @@ class ClusteringService:
         if not per_k_bic:
             return 0, -1.0, None, []
 
-        # BIC: lower = better
-        best_k = min(per_k_bic, key=per_k_bic.get)
+        # ── v6.2 silhouette-gated selection (mirrors _find_optimal_k) ──
+        # Pure minimum-BIC keeps adding mixture components on a continuous
+        # gradient. Silhouette is the only index on an absolute scale, so it
+        # gates K: among the K values whose silhouette is within sil_tol of
+        # the peak, BIC arbitrates (lower = better). If even the peak
+        # silhouette is <= 0.25 the data carries no real cluster structure
+        # and the smallest such K is the honest choice.
+        sil_tol = 0.02
+        peak_sil = max(per_k_sil.values())
+        contenders = [k for k, s in per_k_sil.items()
+                      if peak_sil - s <= sil_tol]
+        if len(contenders) == 1:
+            best_k = contenders[0]
+        else:
+            best_k = min(contenders, key=lambda k: per_k_bic[k])
+        low_structure = peak_sil <= 0.25
+        if low_structure:
+            logger.info(
+                "GMM-BIC: peak silhouette %.3f <= 0.25 — weak cluster "
+                "structure; selecting smallest silhouette-tied k=%d",
+                peak_sil, best_k,
+            )
         best_sil = per_k_sil[best_k]
         best_labels = per_k_labels[best_k]
 
@@ -588,6 +646,167 @@ class ClusteringService:
             })
 
         return best_k, best_sil, best_labels, diagnostic
+
+    # ------------------------------------------------------------------
+    # v6.2 — cluster-validity diagnostics (tendency · gap · stability)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _hopkins_statistic(
+        X: np.ndarray,
+        sample_ratio: float = 0.1,
+        random_state: int = 42,
+    ) -> float:
+        """Hopkins statistic of clustering tendency.
+
+        Sampled on the standardised feature matrix. H ~ 0.5 means the data
+        is indistinguishable from a uniform random cloud (no meaningful
+        clusters); H -> 1.0 indicates strong cluster structure. Reporting
+        this BEFORE choosing K stops the pipeline from imposing archetypes
+        on data that has none — a continuous streetscape gradient honestly
+        scores in the 0.5-0.7 range.
+        """
+        rng = np.random.default_rng(random_state)
+        n, d = X.shape
+        m = min(max(5, int(n * sample_ratio)), n - 1)
+        if m < 1:
+            return 0.5
+        nn = NearestNeighbors(n_neighbors=2).fit(X)
+        # w_i: distance from a sampled REAL point to its nearest other real point
+        real_idx = rng.choice(n, size=m, replace=False)
+        w_dist, _ = nn.kneighbors(X[real_idx], n_neighbors=2)
+        w = w_dist[:, 1]
+        # u_i: distance from a uniform-random point to its nearest real point
+        lo, hi = X.min(axis=0), X.max(axis=0)
+        U = rng.uniform(lo, hi, size=(m, d))
+        u_dist, _ = nn.kneighbors(U, n_neighbors=1)
+        u = u_dist[:, 0]
+        denom = float(np.sum(u) + np.sum(w))
+        return 0.5 if denom == 0 else float(np.sum(u) / denom)
+
+    @staticmethod
+    def _gap_statistic(
+        X: np.ndarray,
+        k_range: tuple[int, int] = (2, 8),
+        n_refs: int = 10,
+        random_state: int = 42,
+    ) -> list[dict]:
+        """Tibshirani et al. (2001) gap statistic.
+
+        Compares the within-cluster dispersion of the data against that of
+        ``n_refs`` uniform reference datasets drawn over the data's bounding
+        box. Returns ``[{k, gap, s_k, is_selected}, ...]``; the selected K
+        is the smallest k with Gap(k) >= Gap(k+1) - s_{k+1}. Reported as an
+        independent K-validity criterion — it does NOT override the
+        primary K selection.
+        """
+        rng = np.random.default_rng(random_state)
+        lo, hi = k_range
+        hi = min(hi, len(X) - 1)
+        if hi < lo:
+            return []
+        # PCA-aligned reference box (Tibshirani et al. 2001, method b):
+        # uniform over the bounding box of the data's principal components,
+        # back-transformed to feature space. A raw axis-aligned bounding box
+        # inflates the gap for spread-out data and never lets the curve peak.
+        mu = X.mean(axis=0)
+        Xc = X - mu
+        try:
+            _, _, Vt = np.linalg.svd(Xc, full_matrices=False)
+        except np.linalg.LinAlgError:
+            Vt = np.eye(X.shape[1])
+        Xpc = Xc @ Vt.T
+        pc_lo, pc_hi = Xpc.min(axis=0), Xpc.max(axis=0)
+
+        def _make_reference() -> np.ndarray:
+            return rng.uniform(pc_lo, pc_hi, size=X.shape) @ Vt + mu
+
+        def _log_dispersion(data: np.ndarray, k: int) -> float:
+            km = KMeans(n_clusters=k, n_init=10, random_state=random_state)
+            lab = km.fit_predict(data)
+            w = 0.0
+            for c in range(k):
+                pts = data[lab == c]
+                if len(pts) > 1:
+                    w += float(((pts - pts.mean(axis=0)) ** 2).sum())
+            return float(np.log(w)) if w > 0 else 0.0
+
+        gaps: dict[int, float] = {}
+        sks: dict[int, float] = {}
+        rows: list[dict] = []
+        for k in range(lo, hi + 1):
+            obs = _log_dispersion(X, k)
+            refs = np.array([
+                _log_dispersion(_make_reference(), k)
+                for _ in range(n_refs)
+            ])
+            gap = float(refs.mean() - obs)
+            sk = float(refs.std() * np.sqrt(1.0 + 1.0 / n_refs))
+            gaps[k] = gap
+            sks[k] = sk
+            rows.append({"k": k, "gap": round(gap, 4), "s_k": round(sk, 4)})
+        best_k = lo
+        for k in range(lo, hi):
+            if gaps[k] >= gaps[k + 1] - sks[k + 1]:
+                best_k = k
+                break
+        else:
+            best_k = max(gaps, key=gaps.get) if gaps else lo
+        for r in rows:
+            r["is_selected"] = (r["k"] == best_k)
+        return rows
+
+    @staticmethod
+    def _bootstrap_cluster_stability(
+        X: np.ndarray,
+        base_labels: np.ndarray,
+        k: int,
+        n_boot: int = 100,
+        random_state: int = 42,
+    ) -> dict[str, float]:
+        """Hennig (2007) bootstrap cluster stability.
+
+        For each of ``n_boot`` bootstrap resamples the data is re-clustered
+        (KMeans, same k); for every original cluster the maximum Jaccard
+        similarity to any bootstrap cluster is recorded, then averaged.
+        Returns ``{cluster_id: mean Jaccard}`` in [0, 1]. Hennig's bands:
+        >= 0.85 highly stable, 0.75-0.85 stable, 0.60-0.75 indicates a
+        pattern, < 0.60 unstable / dissolved. This measures whether each
+        archetype is a robust feature of the data or an artefact of one
+        particular partition.
+        """
+        rng = np.random.default_rng(random_state)
+        n = len(X)
+        base = np.asarray(base_labels)
+        clusters = sorted({int(c) for c in base})
+        base_sets = {c: set(np.where(base == c)[0].tolist()) for c in clusters}
+        jacc: dict[int, list[float]] = {c: [] for c in clusters}
+        for _ in range(n_boot):
+            idx = rng.choice(n, size=n, replace=True)
+            uniq = np.unique(idx)
+            if len(uniq) <= k:
+                continue
+            try:
+                bl = KMeans(n_clusters=k, n_init=5,
+                            random_state=random_state).fit_predict(X[uniq])
+            except Exception:
+                continue
+            uniq_set = set(uniq.tolist())
+            boot_sets = [set(uniq[bl == bc].tolist()) for bc in range(k)]
+            for c in clusters:
+                orig = base_sets[c] & uniq_set
+                if not orig:
+                    continue
+                best = 0.0
+                for bs in boot_sets:
+                    union = len(orig | bs)
+                    if union:
+                        best = max(best, len(orig & bs) / union)
+                jacc[c].append(best)
+        return {
+            str(c): round(float(np.mean(v)), 4) if v else 0.0
+            for c, v in jacc.items()
+        }
 
     @staticmethod
     def _knn_smooth(

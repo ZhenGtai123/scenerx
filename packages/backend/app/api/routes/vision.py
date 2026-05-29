@@ -96,7 +96,10 @@ async def analyze_image(
 
     # Save uploaded file to temp location
     settings.ensure_directories()
-    temp_path = settings.temp_full_path / f"upload_{file.filename}"
+    # Strip any directory components from the client-supplied filename to
+    # prevent path traversal (e.g. "../../x"). Keep only the basename.
+    _safe_name = (file.filename or "image").replace("\\", "/").rsplit("/", 1)[-1]
+    temp_path = settings.temp_full_path / f"upload_{_safe_name}"
 
     try:
         content = await file.read()
@@ -139,7 +142,10 @@ async def analyze_image_panorama(
         raise HTTPException(status_code=400, detail=error)
 
     settings.ensure_directories()
-    temp_path = settings.temp_full_path / f"upload_{file.filename}"
+    # Strip any directory components from the client-supplied filename to
+    # prevent path traversal (e.g. "../../x"). Keep only the basename.
+    _safe_name = (file.filename or "image").replace("\\", "/").rsplit("/", 1)[-1]
+    temp_path = settings.temp_full_path / f"upload_{_safe_name}"
 
     try:
         content = await file.read()
@@ -316,10 +322,31 @@ async def analyze_project_image_panorama(
     if not valid:
         raise HTTPException(status_code=400, detail=error)
 
+    # v4.x — Honor the user's "Views for downstream analysis" picker. If the
+    # project carries a non-empty `active_panorama_views`, restrict to those
+    # views only: don't save unselected views' masks to disk and don't put
+    # their entries in `img.mask_filepaths`. Empty/missing falls back to the
+    # legacy behaviour of saving all three views (so non-panorama callers and
+    # older projects that pre-date the picker keep working unchanged).
+    #
+    # NOTE on the upstream API cost: the Vision API's panorama endpoint
+    # always processes all three view crops in one call — there's no
+    # "process only these views" parameter on its side. We DO still pay for
+    # those crops upstream; what changes here is that we discard the
+    # unselected views' outputs instead of persisting them to disk + the
+    # project record + the downstream pipeline. From the user's perspective
+    # (Vision Analysis preview, mask ZIP, indicator/clustering/report
+    # pipeline, AI report), the unselected views simply don't exist.
+    allowed_views = set(project.active_panorama_views or []) or {"left", "front", "right"}
+    skipped_views: list[str] = []
+
     views_result = await vision_client.analyze_panorama(img.filepath, request)
 
     panorama_views: dict[str, PanoramaViewResult] = {}
     for view_name, view_response in views_result.items():
+        if view_name not in allowed_views:
+            skipped_views.append(view_name)
+            continue
         if view_response.status == "success" and view_response.images:
             view_image_id = f"{image_id}_{view_name}"
             saved = await _save_masks_to_project(view_response, project_id, view_image_id, settings)
@@ -335,6 +362,34 @@ async def analyze_project_image_panorama(
                 status="error",
                 error=view_response.error or "View analysis failed",
             )
+
+    # Cleanup pass — if a view used to be selected and got processed in a
+    # previous run, but the user has since unchecked it, purge its stale
+    # entries from `mask_filepaths` (and the on-disk PNGs) so the project
+    # record reflects the current selection. Without this, a user who
+    # processed all three views then unchecks Front would still see Front's
+    # masks lingering in the preview, the ZIP download, and the per-view
+    # bucket.
+    stale_keys = [k for k in list(img.mask_filepaths.keys())
+                  for v in (k.split("_", 1),)
+                  if len(v) == 2 and v[0] in ("left", "front", "right") and v[0] not in allowed_views]
+    for key in stale_keys:
+        stale_path = img.mask_filepaths.pop(key, None)
+        if stale_path:
+            try:
+                Path(stale_path).unlink(missing_ok=True)
+            except Exception as e:
+                logger.warning("Failed to unlink stale mask %s: %s", stale_path, e)
+    if stale_keys:
+        logger.info(
+            "Purged %d stale mask entries for unchecked panorama views on image %s: %s",
+            len(stale_keys), image_id, sorted(set(k.split("_", 1)[0] for k in stale_keys)),
+        )
+    if skipped_views:
+        logger.info(
+            "Skipped saving %d unchecked panorama views for image %s: %s",
+            len(skipped_views), image_id, sorted(skipped_views),
+        )
 
     projects_store.save(project)
 

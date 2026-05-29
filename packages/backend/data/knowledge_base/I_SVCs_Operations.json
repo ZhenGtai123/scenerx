@@ -32950,7 +32950,7 @@
       "indicator_id": "IND_FG_ERI",
       "current_value": "High",
       "target_value": "Low",
-      "indicator_name": "Foreground Edge Roughness Index (S_ERI)",
+      "indicator_name": "S_ERI (S_ERI)",
       "svc_matrix_expansion_ref": {
         "indicator_id": "IND_FG_ERI",
         "semantic_layer_scope": [
@@ -32970,7 +32970,7 @@
       }
     },
     "operation": {
-      "description": "Modify the Foreground Edge Roughness Index (S_ERI) by adjusting the indicator-targeted semantic class proportions in the streetscape (operation derived from indicator definition; not yet specified to paper-level intervention).",
+      "description": "Modify the S_ERI (S_ERI) by adjusting the indicator-targeted semantic class proportions in the streetscape (operation derived from indicator definition; not yet specified to paper-level intervention).",
       "pathway": {
         "mechanism": "direct_pixel_proportion_modification",
         "steps": [
@@ -32978,7 +32978,7 @@
           "Plan intervention to modify class proportion",
           "Validate via streetscape resampling"
         ],
-        "mechanism_description": "Modify the Foreground Edge Roughness Index (S_ERI) by adjusting the indicator-targeted semantic class proportions in the streetscape (operation derived from indicator definition; not yet specified to ..."
+        "mechanism_description": "Modify the S_ERI (S_ERI) by adjusting the indicator-targeted semantic class proportions in the streetscape (operation derived from indicator definition; not yet specified to ..."
       },
       "signatures": [
         {
@@ -33036,7 +33036,7 @@
         "direction": "decrease",
         "magnitude": "94.12",
         "type": "qualitative",
-        "description": "Modifying signature SIG_MOD_VEG_FG_SHP is expected to lower Foreground Edge Roughness Index (S_ERI).",
+        "description": "Modifying signature SIG_MOD_VEG_FG_SHP is expected to lower S_ERI (S_ERI).",
         "note": "Auto-generated 2026-05-10 L15 IOM, pending human-authored magnitude."
       },
       "performance_effect": {
@@ -33064,7 +33064,7 @@
       "indicator_id": "IND_FG_ECI",
       "current_value": "High",
       "target_value": "Low",
-      "indicator_name": "Foreground Edge Contrast Index (S_ECI)",
+      "indicator_name": "S_ECI (S_ECI)",
       "svc_matrix_expansion_ref": {
         "indicator_id": "IND_FG_ECI",
         "semantic_layer_scope": [
@@ -33084,7 +33084,7 @@
       }
     },
     "operation": {
-      "description": "Modify the Foreground Edge Contrast Index (S_ECI) by adjusting the indicator-targeted semantic class proportions in the streetscape (operation derived from indicator definition; not yet specified to paper-level intervention).",
+      "description": "Modify the S_ECI (S_ECI) by adjusting the indicator-targeted semantic class proportions in the streetscape (operation derived from indicator definition; not yet specified to paper-level intervention).",
       "pathway": {
         "mechanism": "direct_pixel_proportion_modification",
         "steps": [
@@ -33092,7 +33092,7 @@
           "Plan intervention to modify class proportion",
           "Validate via streetscape resampling"
         ],
-        "mechanism_description": "Modify the Foreground Edge Contrast Index (S_ECI) by adjusting the indicator-targeted semantic class proportions in the streetscape (operation derived from indicator definition; not yet specified to p..."
+        "mechanism_description": "Modify the S_ECI (S_ECI) by adjusting the indicator-targeted semantic class proportions in the streetscape (operation derived from indicator definition; not yet specified to p..."
       },
       "signatures": [
         {
@@ -33150,7 +33150,7 @@
         "direction": "unspecified",
         "magnitude": "94.12",
         "type": "qualitative",
-        "description": "Modifying signature SIG_MOD_VEG_FG_SHP is expected to lower Foreground Edge Contrast Index (S_ECI).",
+        "description": "Modifying signature SIG_MOD_VEG_FG_SHP is expected to lower S_ECI (S_ECI).",
         "note": "Auto-generated 2026-05-10 L15 IOM, pending human-authored magnitude."
       },
       "performance_effect": {
@@ -33178,7 +33178,7 @@
       "indicator_id": "IND_FG_PSI",
       "current_value": "Low",
       "target_value": "High",
-      "indicator_name": "Foreground Hole-Shape Similarity Index (S_PSI)",
+      "indicator_name": "S_PSI (S_PSI)",
       "svc_matrix_expansion_ref": {
         "indicator_id": "IND_FG_PSI",
         "semantic_layer_scope": [
@@ -33198,7 +33198,7 @@
       }
     },
     "operation": {
-      "description": "Modify the Foreground Hole-Shape Similarity Index (S_PSI) by adjusting the indicator-targeted semantic class proportions in the streetscape (operation derived from indicator definition; not yet specified to paper-level intervention).",
+      "description": "Modify the S_PSI (S_PSI) by adjusting the indicator-targeted semantic class proportions in the streetscape (operation derived from indicator definition; not yet specified to paper-level intervention).",
       "pathway": {
         "mechanism": "direct_pixel_proportion_modification",
         "steps": [
@@ -33206,7 +33206,7 @@
           "Plan intervention to modify class proportion",
           "Validate via streetscape resampling"
         ],
-        "mechanism_description": "Modify the Foreground Hole-Shape Similarity Index (S_PSI) by adjusting the indicator-targeted semantic class proportions in the streetscape (operation derived from indicator definition; not yet specif..."
+        "mechanism_description": "Modify the S_PSI (S_PSI) by adjusting the indicator-targeted semantic class proportions in the streetscape (operation derived from indicator definition; not yet specif..."
       },
       "signatures": [
         {
@@ -33264,7 +33264,7 @@
         "direction": "unspecified",
         "magnitude": "94.12",
         "type": "qualitative",
-        "description": "Modifying signature SIG_MOD_VEG_FG_SHP is expected to raise Foreground Hole-Shape Similarity Index (S_PSI).",
+        "description": "Modifying signature SIG_MOD_VEG_FG_SHP is expected to raise S_PSI (S_PSI).",
         "note": "Auto-generated 2026-05-10 L15 IOM, pending human-authored magnitude."
       },
       "performance_effect": {
@@ -33292,7 +33292,7 @@
       "indicator_id": "IND_FG_API",
       "current_value": "High",
       "target_value": "Low",
-      "indicator_name": "Foreground Asymmetry / Profile Index (S_API)",
+      "indicator_name": "S_API (S_API)",
       "svc_matrix_expansion_ref": {
         "indicator_id": "IND_FG_API",
         "semantic_layer_scope": [
@@ -33312,7 +33312,7 @@
       }
     },
     "operation": {
-      "description": "Modify the Foreground Asymmetry / Profile Index (S_API) by adjusting the indicator-targeted semantic class proportions in the streetscape (operation derived from indicator definition; not yet specified to paper-level intervention).",
+      "description": "Modify the S_API (S_API) by adjusting the indicator-targeted semantic class proportions in the streetscape (operation derived from indicator definition; not yet specified to paper-level intervention).",
       "pathway": {
         "mechanism": "direct_pixel_proportion_modification",
         "steps": [
@@ -33320,7 +33320,7 @@
           "Plan intervention to modify class proportion",
           "Validate via streetscape resampling"
         ],
-        "mechanism_description": "Modify the Foreground Asymmetry / Profile Index (S_API) by adjusting the indicator-targeted semantic class proportions in the streetscape (operation derived from indicator definition; not yet specifie..."
+        "mechanism_description": "Modify the S_API (S_API) by adjusting the indicator-targeted semantic class proportions in the streetscape (operation derived from indicator definition; not yet specifie..."
       },
       "signatures": [
         {
@@ -33378,7 +33378,7 @@
         "direction": "unspecified",
         "magnitude": "94.12",
         "type": "qualitative",
-        "description": "Modifying signature SIG_MOD_VEG_FG_SHP is expected to lower Foreground Asymmetry / Profile Index (S_API).",
+        "description": "Modifying signature SIG_MOD_VEG_FG_SHP is expected to lower S_API (S_API).",
         "note": "Auto-generated 2026-05-10 L15 IOM, pending human-authored magnitude."
       },
       "performance_effect": {
@@ -33406,7 +33406,7 @@
       "indicator_id": "IND_FG_ADI",
       "current_value": "High",
       "target_value": "Low",
-      "indicator_name": "Foreground Largest-Hole Asymmetry Index (S_ADI)",
+      "indicator_name": "S_ADI (S_ADI)",
       "svc_matrix_expansion_ref": {
         "indicator_id": "IND_FG_ADI",
         "semantic_layer_scope": [
@@ -33426,7 +33426,7 @@
       }
     },
     "operation": {
-      "description": "Modify the Foreground Largest-Hole Asymmetry Index (S_ADI) by adjusting the indicator-targeted semantic class proportions in the streetscape (operation derived from indicator definition; not yet specified to paper-level intervention).",
+      "description": "Modify the S_ADI (S_ADI) by adjusting the indicator-targeted semantic class proportions in the streetscape (operation derived from indicator definition; not yet specified to paper-level intervention).",
       "pathway": {
         "mechanism": "direct_pixel_proportion_modification",
         "steps": [
@@ -33434,7 +33434,7 @@
           "Plan intervention to modify class proportion",
           "Validate via streetscape resampling"
         ],
-        "mechanism_description": "Modify the Foreground Largest-Hole Asymmetry Index (S_ADI) by adjusting the indicator-targeted semantic class proportions in the streetscape (operation derived from indicator definition; not yet speci..."
+        "mechanism_description": "Modify the S_ADI (S_ADI) by adjusting the indicator-targeted semantic class proportions in the streetscape (operation derived from indicator definition; not yet speci..."
       },
       "signatures": [
         {
@@ -33492,7 +33492,7 @@
         "direction": "decrease",
         "magnitude": "94.12",
         "type": "qualitative",
-        "description": "Modifying signature SIG_MOD_VEG_FG_SHP is expected to lower Foreground Largest-Hole Asymmetry Index (S_ADI).",
+        "description": "Modifying signature SIG_MOD_VEG_FG_SHP is expected to lower S_ADI (S_ADI).",
         "note": "Auto-generated 2026-05-10 L15 IOM, pending human-authored magnitude."
       },
       "performance_effect": {
@@ -33981,7 +33981,7 @@
       "indicator_id": "IND_FG_DEPTH_LV",
       "current_value": "Unspecified",
       "target_value": "Unspecified",
-      "indicator_name": "Foreground Maximum Depth Value (P_LV)",
+      "indicator_name": "P_LV (P_LV)",
       "svc_matrix_expansion_ref": {
         "indicator_id": "IND_FG_DEPTH_LV",
         "semantic_layer_scope": [
@@ -34001,7 +34001,7 @@
       }
     },
     "operation": {
-      "description": "Modify the Foreground Maximum Depth Value (P_LV) by adjusting the indicator-targeted semantic class proportions in the streetscape (operation derived from indicator definition; not yet specified to paper-level intervention).",
+      "description": "Modify the P_LV (P_LV) by adjusting the indicator-targeted semantic class proportions in the streetscape (operation derived from indicator definition; not yet specified to paper-level intervention).",
       "pathway": {
         "mechanism": "direct_pixel_proportion_modification",
         "steps": [
@@ -34009,7 +34009,7 @@
           "Plan intervention to modify class proportion",
           "Validate via streetscape resampling"
         ],
-        "mechanism_description": "Modify the Foreground Maximum Depth Value (P_LV) by adjusting the indicator-targeted semantic class proportions in the streetscape (operation derived from indicator definition; not yet specified to pa..."
+        "mechanism_description": "Modify the P_LV (P_LV) by adjusting the indicator-targeted semantic class proportions in the streetscape (operation derived from indicator definition; not yet specified to pa..."
       },
       "signatures": [
         {
@@ -34067,7 +34067,7 @@
         "direction": "increase",
         "magnitude": "94.12",
         "type": "qualitative",
-        "description": "Modifying signature SIG_MOD_VEG_FG_SHP is expected to lower Foreground Maximum Depth Value (P_LV).",
+        "description": "Modifying signature SIG_MOD_VEG_FG_SHP is expected to lower P_LV (P_LV).",
         "note": "Auto-generated 2026-05-10 L15 IOM, pending human-authored magnitude."
       },
       "performance_effect": {
@@ -34095,7 +34095,7 @@
       "indicator_id": "IND_FG_DEPTH_LN",
       "current_value": "Unspecified",
       "target_value": "Unspecified",
-      "indicator_name": "Foreground Vertical Depth Length (P_LN)",
+      "indicator_name": "P_LN (P_LN)",
       "svc_matrix_expansion_ref": {
         "indicator_id": "IND_FG_DEPTH_LN",
         "semantic_layer_scope": [
@@ -34115,7 +34115,7 @@
       }
     },
     "operation": {
-      "description": "Modify the Foreground Vertical Depth Length (P_LN) by adjusting the indicator-targeted semantic class proportions in the streetscape (operation derived from indicator definition; not yet specified to paper-level intervention).",
+      "description": "Modify the P_LN (P_LN) by adjusting the indicator-targeted semantic class proportions in the streetscape (operation derived from indicator definition; not yet specified to paper-level intervention).",
       "pathway": {
         "mechanism": "direct_pixel_proportion_modification",
         "steps": [
@@ -34123,7 +34123,7 @@
           "Plan intervention to modify class proportion",
           "Validate via streetscape resampling"
         ],
-        "mechanism_description": "Modify the Foreground Vertical Depth Length (P_LN) by adjusting the indicator-targeted semantic class proportions in the streetscape (operation derived from indicator definition; not yet specified to ..."
+        "mechanism_description": "Modify the P_LN (P_LN) by adjusting the indicator-targeted semantic class proportions in the streetscape (operation derived from indicator definition; not yet specified to ..."
       },
       "signatures": [
         {
@@ -34181,7 +34181,7 @@
         "direction": "increase",
         "magnitude": "94.12",
         "type": "qualitative",
-        "description": "Modifying signature SIG_MOD_VEG_FG_SHP is expected to lower Foreground Vertical Depth Length (P_LN).",
+        "description": "Modifying signature SIG_MOD_VEG_FG_SHP is expected to lower P_LN (P_LN).",
         "note": "Auto-generated 2026-05-10 L15 IOM, pending human-authored magnitude."
       },
       "performance_effect": {
@@ -34209,7 +34209,7 @@
       "indicator_id": "IND_FG_DEPTH_ECI",
       "current_value": "Unspecified",
       "target_value": "Unspecified",
-      "indicator_name": "Foreground Depth Continuity Index (P_ECI)",
+      "indicator_name": "P_ECI (P_ECI)",
       "svc_matrix_expansion_ref": {
         "indicator_id": "IND_FG_DEPTH_ECI",
         "semantic_layer_scope": [
@@ -34229,7 +34229,7 @@
       }
     },
     "operation": {
-      "description": "Modify the Foreground Depth Continuity Index (P_ECI) by adjusting the indicator-targeted semantic class proportions in the streetscape (operation derived from indicator definition; not yet specified to paper-level intervention).",
+      "description": "Modify the P_ECI (P_ECI) by adjusting the indicator-targeted semantic class proportions in the streetscape (operation derived from indicator definition; not yet specified to paper-level intervention).",
       "pathway": {
         "mechanism": "direct_pixel_proportion_modification",
         "steps": [
@@ -34237,7 +34237,7 @@
           "Plan intervention to modify class proportion",
           "Validate via streetscape resampling"
         ],
-        "mechanism_description": "Modify the Foreground Depth Continuity Index (P_ECI) by adjusting the indicator-targeted semantic class proportions in the streetscape (operation derived from indicator definition; not yet specified t..."
+        "mechanism_description": "Modify the P_ECI (P_ECI) by adjusting the indicator-targeted semantic class proportions in the streetscape (operation derived from indicator definition; not yet specified t..."
       },
       "signatures": [
         {
@@ -34295,7 +34295,7 @@
         "direction": "increase",
         "magnitude": "94.12",
         "type": "qualitative",
-        "description": "Modifying signature SIG_MOD_VEG_FG_SHP is expected to lower Foreground Depth Continuity Index (P_ECI).",
+        "description": "Modifying signature SIG_MOD_VEG_FG_SHP is expected to lower P_ECI (P_ECI).",
         "note": "Auto-generated 2026-05-10 L15 IOM, pending human-authored magnitude."
       },
       "performance_effect": {

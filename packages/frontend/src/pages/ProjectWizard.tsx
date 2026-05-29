@@ -43,6 +43,7 @@ import api from '../api';
 import useAppToast from '../hooks/useAppToast';
 import PageShell from '../components/PageShell';
 import EncodingInfoPopover from '../components/EncodingInfoPopover';
+import { ErrorBoundary } from '../components/ErrorBoundary';
 import { useEncodingSections } from '../hooks/useApi';
 import type { EncodingEntry, SpatialRelation } from '../types';
 
@@ -680,6 +681,12 @@ function ProjectWizard() {
         </Card>
 
         {/* Section 4: Spatial Zones */}
+        {/* v4.x — ErrorBoundary around the zone editor: this is the most
+            crash-prone section in ProjectWizard (add/remove zones triggers
+            list mutations + form re-renders, area/zone-type tag manipulation
+            can produce undefined intermediate states). A crash here doesn't
+            take out the relations editor below or the form sections above. */}
+        <ErrorBoundary label="Spatial Zones editor">
         <Card>
           <CardHeader>
             <HStack justify="space-between">
@@ -771,4 +778,202 @@ function ProjectWizard() {
                           onChange={(e) => updateZone(zone.id, { description: e.target.value })}
                           placeholder="Description or current issues..."
                         />
-                    
+                      </FormControl>
+                      <Button
+                        size="sm"
+                        colorScheme="red"
+                        variant="ghost"
+                        onClick={() => removeZone(zone.id)}
+                      >
+                        Remove
+                      </Button>
+                    </HStack>
+                  </Box>
+                ))}
+              </VStack>
+            )}
+          </CardBody>
+        </Card>
+        </ErrorBoundary>
+
+        {/* Section 4b: Zone-to-Zone Relations.
+            Declares the spatial graph between zones so downstream analysis
+            (within-zone clustering, cross-zone correlation claims) can be
+            conditioned on the declared edges rather than treating every
+            zone pair as independent. Empty = independent (legacy behaviour). */}
+        <ErrorBoundary label="Zone Relations editor">
+        <Card>
+          <CardHeader>
+            <HStack justify="space-between">
+              <SectionTitle
+                icon={Map}
+                title="Zone-to-Zone Relations"
+                subtitle="Declare how zones relate; constrains cross-zone interpretation downstream"
+              />
+              <Button
+                colorScheme="blue"
+                size="sm"
+                onClick={addRelation}
+                leftIcon={<Plus size={14} />}
+                isDisabled={zones.length < 2}
+              >
+                Add Relation
+              </Button>
+            </HStack>
+          </CardHeader>
+          <CardBody>
+            {zones.length < 2 ? (
+              <Box textAlign="center" py={4} color="gray.500">
+                <Text fontSize="sm">Define at least two zones above before declaring relations.</Text>
+              </Box>
+            ) : relations.length === 0 ? (
+              <Box textAlign="center" py={4} color="gray.500">
+                <Text fontSize="sm">
+                  No relations declared yet — downstream cross-zone analysis will treat zones as independent.
+                </Text>
+              </Box>
+            ) : (
+              <VStack spacing={3} align="stretch">
+                {relations.map((rel, i) => {
+                  const isSelfLoop = rel.from_zone === rel.to_zone;
+                  return (
+                    <Box
+                      key={`${rel.from_zone}-${rel.to_zone}-${i}`}
+                      p={3}
+                      borderWidth={1}
+                      borderRadius="md"
+                      borderColor={isSelfLoop ? 'red.300' : 'gray.200'}
+                      bg="gray.50"
+                    >
+                      <SimpleGrid columns={{ base: 1, md: 5 }} spacing={3} alignItems="end">
+                        <FormControl>
+                          <FormLabel fontSize="xs">From Zone</FormLabel>
+                          <Select
+                            size="sm"
+                            value={rel.from_zone}
+                            onChange={(e) => updateRelation(i, { from_zone: e.target.value })}
+                          >
+                            {zones.map(z => (
+                              <option key={z.id} value={z.id}>{z.name || z.id}</option>
+                            ))}
+                          </Select>
+                        </FormControl>
+                        <FormControl>
+                          <FormLabel fontSize="xs">Relation</FormLabel>
+                          <Select
+                            size="sm"
+                            value={rel.relation_type}
+                            onChange={(e) => {
+                              const next = RELATION_TYPES.find(t => t.id === e.target.value);
+                              updateRelation(i, {
+                                relation_type: e.target.value,
+                                direction: next?.defaultDirection ?? 'bidirectional',
+                              });
+                            }}
+                          >
+                            {RELATION_TYPES.map(t => (
+                              <option key={t.id} value={t.id}>{t.name}</option>
+                            ))}
+                          </Select>
+                        </FormControl>
+                        <FormControl>
+                          <FormLabel fontSize="xs">To Zone</FormLabel>
+                          <Select
+                            size="sm"
+                            value={rel.to_zone}
+                            onChange={(e) => updateRelation(i, { to_zone: e.target.value })}
+                          >
+                            {zones.map(z => (
+                              <option key={z.id} value={z.id}>{z.name || z.id}</option>
+                            ))}
+                          </Select>
+                        </FormControl>
+                        <FormControl>
+                          <FormLabel fontSize="xs">Direction</FormLabel>
+                          <Select
+                            size="sm"
+                            value={rel.direction || 'single'}
+                            onChange={(e) => updateRelation(i, { direction: e.target.value })}
+                          >
+                            <option value="single">Single (A → B)</option>
+                            <option value="bidirectional">Bidirectional (A ↔ B)</option>
+                          </Select>
+                        </FormControl>
+                        <Button
+                          size="sm"
+                          colorScheme="red"
+                          variant="ghost"
+                          onClick={() => removeRelation(i)}
+                        >
+                          Remove
+                        </Button>
+                      </SimpleGrid>
+                      {isSelfLoop && (
+                        <Text fontSize="xs" color="red.600" mt={2}>
+                          A zone cannot relate to itself — pick a different To Zone (this row will be dropped on save).
+                        </Text>
+                      )}
+                    </Box>
+                  );
+                })}
+                <Text fontSize="2xs" color="gray.600">
+                  <strong>adjacent / nearby / connected</strong> permit cross-zone correlation in within-zone
+                  clustering reports. <strong>contains</strong> marks a parent-child hierarchy.
+                  <strong> distant</strong> is an explicit exclusion against spurious spatial-pattern claims.
+                </Text>
+              </VStack>
+            )}
+          </CardBody>
+        </Card>
+        </ErrorBoundary>
+
+
+        {/* v4 / Module 11.3.3 — soft-required-fields warning. The 5 listed
+            fields aren't strictly required (only Project Name + at least one
+            Zone Name are blocking), but skipping them materially degrades
+            downstream LLM recommendations. The alert shows what's missing
+            and what each gap costs; the save button stays enabled. */}
+        {(() => {
+          const missing: string[] = [];
+          if (!koppenZone) missing.push('Köppen Climate Zone — Stage 1 transferability weighting');
+          if (!lczType) missing.push('Local Climate Zone (LCZ) — indicator baseline filtering');
+          if (!spaceType) missing.push('Space Type — Stage 4 IOM filtering');
+          if (!designBrief.trim()) missing.push('Design Brief — Stage 1 indicator recommendation prompt');
+          if (selectedDimensions.length === 0) missing.push('Performance Dimensions — Stage 1 indicator filter');
+          if (missing.length === 0) return null;
+          return (
+            <Alert status="warning" borderRadius="md" alignItems="flex-start">
+              <AlertIcon />
+              <Box>
+                <Text fontWeight="bold" fontSize="sm">
+                  Recommended fields are empty (save still allowed)
+                </Text>
+                <Text fontSize="xs" color="gray.700" mt={1}>
+                  These fields aren't strictly required, but leaving them blank
+                  materially affects downstream analysis quality:
+                </Text>
+                <Box as="ul" pl={4} mt={1} fontSize="xs">
+                  {missing.map((m, i) => (
+                    <Box as="li" key={i} listStyleType="disc">{m}</Box>
+                  ))}
+                </Box>
+              </Box>
+            </Alert>
+          );
+        })()}
+
+        {/* Action Buttons */}
+        <HStack justify="space-between">
+          <Button variant="outline" onClick={() => navigate('/projects')}>
+            Cancel
+          </Button>
+          <Button colorScheme="blue" size="lg" onClick={handleSave} isLoading={saving}>
+            {isEditMode ? 'Save & Continue' : 'Create & Continue'}
+          </Button>
+        </HStack>
+      </VStack>
+    </PageShell>
+  );
+}
+
+export default ProjectWizard;

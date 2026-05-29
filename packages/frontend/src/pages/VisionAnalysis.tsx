@@ -48,6 +48,7 @@ import JSZip from 'jszip';
 import { useSemanticConfig, useProject, useRecommendIndicators, useCalculators, useVisionHealth } from '../hooks/useApi';
 import type { RecommendStage } from '../hooks/useApi';
 import api from '../api';
+import { ErrorBoundary } from '../components/ErrorBoundary';
 import type { SemanticClass, UploadedImage, IndicatorRecommendation } from '../types';
 import PageShell from '../components/PageShell';
 import PageHeader from '../components/PageHeader';
@@ -436,6 +437,12 @@ function VisionAnalysis() {
 
   // Panorama mode
   const [isPanorama, setIsPanorama] = useState(false);
+  // v4.x — Per-view selection for downstream pipeline. Subset of
+  // ["left", "front", "right"]. Reads/writes back to
+  // `project.active_panorama_views`. When `isPanorama` flips on for the
+  // first time we default to all three views ticked; users untick to
+  // limit which views get their own indicator/clustering/report run.
+  const [activePanoramaViews, setActivePanoramaViews] = useState<string[]>([]);
 
   // Force re-analyze (bypass skip-already-processed resume logic)
   const [forceRerun, setForceRerun] = useState(false);
@@ -571,13 +578,21 @@ function VisionAnalysis() {
       if (!selectedSet.has(img.image_id)) continue;
       const mp = img.mask_filepaths;
       if (!mp || Object.keys(mp).length === 0) continue;
+      // v4.x — Per-view aware: in panorama mode, count "already done" only
+      // when EVERY currently-selected view has a semantic_map. Without this,
+      // unchecking Front on an image that was processed with all 3 views
+      // would still count as done, and the analyze pass wouldn't re-run for
+      // the now-narrower scope.
+      const viewsToCheck = activePanoramaViews.length > 0
+        ? activePanoramaViews
+        : ['left', 'front', 'right'];
       const matched = isPanorama
-        ? ['front_semantic_map', 'left_semantic_map', 'right_semantic_map'].some(k => !!mp[k])
+        ? viewsToCheck.every(v => !!mp[`${v}_semantic_map`])
         : !!mp['semantic_map'];
       if (matched) alreadyDone++;
     }
     return { alreadyDone, toProcess: selectedProjectImages.size - alreadyDone };
-  }, [project, selectedProjectImages, isPanorama]);
+  }, [project, selectedProjectImages, isPanorama, activePanoramaViews]);
 
   const maskFileCount = useMemo(
     () => maskResults.reduce((s, r) => s + Object.keys(r.maskPaths).length, 0),
@@ -667,6 +682,37 @@ function VisionAnalysis() {
       classesInitialized.current = true;
     }
   }, [semanticConfig]);
+
+  // v4.x — Hydrate panorama view selection from the project record once it
+  // arrives. If the project has `active_panorama_views` set, restore it AND
+  // normalize: panorama mode is now all-or-nothing (the per-view picker was
+  // retired), so any partial subset stored from a previous session (e.g.
+  // ["left", "right"] from when the user had unchecked Front in the now-
+  // removed CheckboxGroup) MUST be promoted to the full set, otherwise the
+  // pipeline loop / vision processing / Reports segmented control would all
+  // honour the stale partial selection and silently exclude views that
+  // should be active.
+  const panoramaHydrated = useRef(false);
+  useEffect(() => {
+    if (panoramaHydrated.current || !project) return;
+    const stored = project.active_panorama_views;
+    if (Array.isArray(stored) && stored.length > 0) {
+      const fullSet = ['left', 'front', 'right'];
+      const isFullSet = stored.length === 3 && fullSet.every(v => stored.includes(v));
+      const normalized = isFullSet ? stored : fullSet;
+      setActivePanoramaViews(normalized);
+      setIsPanorama(true);
+      if (!isFullSet && projectId) {
+        // Write the normalized full set back to the project record so the
+        // next consumer (Analysis page's pipeline trigger, Reports page's
+        // segmented control, the backend's per-view filters) sees the
+        // correct scope.
+        api.projects.update(projectId, { active_panorama_views: fullSet })
+          .catch(err => console.error('Normalize active_panorama_views failed', err));
+      }
+    }
+    panoramaHydrated.current = true;
+  }, [project, projectId]);
 
   // Default: select all project images once when project loads
   const imagesInitialized = useRef(false);
@@ -788,12 +834,25 @@ function VisionAnalysis() {
         };
 
         // Detect whether this image is already processed by checking backend-persisted mask_filepaths.
-        // Standard mode needs `semantic_map`; panorama mode needs at least one `{view}_semantic_map`.
+        // Standard mode needs `semantic_map`; panorama mode needs at least one `{view}_semantic_map`
+        // FOR A VIEW THAT'S CURRENTLY SELECTED. v4.x — if the user has unchecked
+        // a view (e.g. Front), an image whose only saved masks are for that
+        // unchecked view should NOT count as processed, so the analyze pass
+        // generates masks for the selected views instead of bailing out as
+        // "cached". The backend purge in vision.py removes the unchecked
+        // view's mask files on the next run, completing the cleanup.
         const isAlreadyProcessed = (img: UploadedImage): boolean => {
           const mp = img.mask_filepaths;
           if (!mp || Object.keys(mp).length === 0) return false;
           if (isPanorama) {
-            return ['front_semantic_map', 'left_semantic_map', 'right_semantic_map'].some(k => !!mp[k]);
+            // Require EVERY selected view to have a semantic_map. If any
+            // selected view is missing, the image needs re-processing.
+            // Empty selection (legacy, shouldn't happen with isPanorama=true)
+            // falls back to the original "any view present" check.
+            const viewsToCheck = activePanoramaViews.length > 0
+              ? activePanoramaViews
+              : ['left', 'front', 'right'];
+            return viewsToCheck.every(v => !!mp[`${v}_semantic_map`]);
           }
           return !!mp['semantic_map'];
         };
@@ -804,7 +863,41 @@ function VisionAnalysis() {
 
           // Resume: skip already-processed images (unless user forces re-run)
           if (!forceRerun && isAlreadyProcessed(img)) {
-            maskBuffer.push({ imageId, maskPaths: img.mask_filepaths });
+            // v4.x — Split panorama keys into per-view maskBuffer entries so
+            // the URL builder (`/api/masks/{project}/{imageId}/{maskKey}.png`)
+            // lines up with the actual on-disk layout
+            // (`masks/{project}/{imageId}_{view}/{key}.png`).
+            // Without this split, cached panorama images flowed through as
+            // a single entry with imageId=raw + maskKey=`{view}_{key}`,
+            // producing URLs `/api/masks/{p}/{img_id}/left_semantic_xxx.png`
+            // that 404'd because the disk file is at
+            // `/api/masks/{p}/{img_id}_left/semantic_xxx.png`.
+            // Mirrors the hydration logic above (line 720-758) and the
+            // fresh-processed path below (line 886-893) so all three
+            // entry points produce identically-shaped maskBuffer entries.
+            if (isPanorama) {
+              const standardPaths: Record<string, string> = {};
+              const viewPaths: Record<string, Record<string, string>> = {};
+              for (const [key, path] of Object.entries(img.mask_filepaths)) {
+                const m = key.match(/^(left|front|right)_(.+)$/);
+                if (m) {
+                  const view = m[1];
+                  const rest = m[2];
+                  if (!viewPaths[view]) viewPaths[view] = {};
+                  viewPaths[view][rest] = path;
+                } else {
+                  standardPaths[key] = path;
+                }
+              }
+              if (Object.keys(standardPaths).length > 0) {
+                maskBuffer.push({ imageId, maskPaths: standardPaths });
+              }
+              for (const [view, paths] of Object.entries(viewPaths)) {
+                maskBuffer.push({ imageId: `${imageId}_${view}`, maskPaths: paths });
+              }
+            } else {
+              maskBuffer.push({ imageId, maskPaths: img.mask_filepaths });
+            }
             successCount++;
             skipped++;
             processed++;
@@ -1016,8 +1109,12 @@ function VisionAnalysis() {
 
       <SimpleGrid columns={{ base: 1, xl: 2 }} spacing={6}>
         {/* ═══ LEFT COLUMN: Vision Analysis ═══ */}
+        {/* v4.x — Per-card ErrorBoundaries: image grid, options form,
+            semantic classes selector, and mask preview each get their own
+            so one card's crash doesn't take out the rest of the column. */}
         <VStack spacing={6} align="stretch">
           {/* Project Images */}
+          <ErrorBoundary label="Project Images grid">
           <Card>
             <CardHeader>
               <Heading size="md">Project Images</Heading>
@@ -1054,8 +1151,10 @@ function VisionAnalysis() {
               )}
             </CardBody>
           </Card>
+          </ErrorBoundary>
 
           {/* Analysis Options */}
+          <ErrorBoundary label="Analysis Options card">
           <Card>
             <CardHeader>
               <Heading size="md">Options</Heading>
@@ -1072,7 +1171,30 @@ function VisionAnalysis() {
                   <Switch
                     id="panorama-mode"
                     isChecked={isPanorama}
-                    onChange={(e) => setIsPanorama(e.target.checked)}
+                    onChange={(e) => {
+                      const next = e.target.checked;
+                      setIsPanorama(next);
+                      // v4.x — Panorama mode is an all-or-nothing toggle:
+                      // ON means "treat as 3-view panorama, process all
+                      // three views every time". The per-view picker that
+                      // used to live here was removed because the upstream
+                      // Vision API's /analyze/panorama endpoint atomically
+                      // processes all three crops anyway (see
+                      // docs/reproducibility_manifest.json: per_view_execution).
+                      // Letting the user untick individual views suggested
+                      // savings that the upstream API doesn't deliver, while
+                      // adding edge cases (stale mask purges, partial
+                      // bucket states, "no views selected" empty downstream).
+                      // Either you want panorama mode → all 3 views go end-
+                      // to-end, or you don't → empty list, legacy single-
+                      // view path.
+                      const nextViews = next ? ['left', 'front', 'right'] : [];
+                      setActivePanoramaViews(nextViews);
+                      if (projectId) {
+                        api.projects.update(projectId, { active_panorama_views: nextViews })
+                          .catch(err => console.error('Persist active_panorama_views failed', err));
+                      }
+                    }}
                     mr={3}
                   />
                   <Box>
@@ -1080,7 +1202,10 @@ function VisionAnalysis() {
                       Panorama Mode
                     </FormLabel>
                     <FormHelperText mt={0} fontSize="xs">
-                      Splits panoramic image into 3 views (left / front / right)
+                      Splits each panoramic image into 3 views (left / front / right).
+                      Every view runs an independent indicator / clustering / report
+                      pipeline; the Reports page has a segmented control to switch
+                      between them.
                     </FormHelperText>
                   </Box>
                 </FormControl>
@@ -1104,8 +1229,10 @@ function VisionAnalysis() {
               </VStack>
             </CardBody>
           </Card>
+          </ErrorBoundary>
 
           {/* Semantic Classes */}
+          <ErrorBoundary label="Semantic Classes card">
           <Card>
             <CardHeader>
               <HStack justify="space-between">
@@ -1131,6 +1258,7 @@ function VisionAnalysis() {
               </CheckboxGroup>
             </CardBody>
           </Card>
+          </ErrorBoundary>
 
           {/* Resume hint */}
           {!forceRerun && resumePreview.alreadyDone > 0 && !analyzing && (
@@ -1248,6 +1376,7 @@ function VisionAnalysis() {
 
           {/* Mask Previews */}
           {maskResults.length > 0 && (
+            <ErrorBoundary label="Vision Output Masks card">
             <Card>
               <CardHeader>
                 <HStack justify="space-between">
@@ -1305,7 +1434,24 @@ function VisionAnalysis() {
                   </Text>
                 )}
                 <VStack align="stretch" spacing={4}>
-                  {maskResults.slice(0, maskVisibleCount).map(({ imageId, maskPaths }) => {
+                  {maskResults
+                    // v4.x — Filter the preview so unchecked panorama views
+                    // are hidden, even if their mask files still exist on
+                    // disk from a previous run when they were selected. The
+                    // backend purge handles the disk side on the NEXT
+                    // analyze run with Force re-analyze; this filter handles
+                    // the IMMEDIATE display so unchecking a view hides it
+                    // right away without forcing a re-process. Non-panorama
+                    // entries (no _left/_front/_right suffix on imageId)
+                    // are always shown.
+                    .filter(({ imageId }) => {
+                      const vm = imageId.match(/^(.+)_(left|front|right)$/);
+                      if (!vm) return true;
+                      // Empty selection = legacy non-panorama project, show all.
+                      if (activePanoramaViews.length === 0) return true;
+                      return activePanoramaViews.includes(vm[2]);
+                    })
+                    .slice(0, maskVisibleCount).map(({ imageId, maskPaths }) => {
                     // For panorama entries like "img1_left", parse the view suffix
                     const viewMatch = imageId.match(/^(.+)_(left|front|right)$/);
                     const baseImageId = viewMatch ? viewMatch[1] : imageId;
@@ -1348,6 +1494,7 @@ function VisionAnalysis() {
                 )}
               </CardBody>
             </Card>
+            </ErrorBoundary>
           )}
 
           {!analyzing && !statistics && maskResults.length === 0 && (
@@ -1361,6 +1508,7 @@ function VisionAnalysis() {
 
         {/* ═══ RIGHT COLUMN: Indicator Recommendations ═══ */}
         <VStack spacing={6} align="stretch">
+          <ErrorBoundary label="Indicator Recommendations panel">
           <Card>
             <CardHeader>
               <HStack justify="space-between">
@@ -1642,6 +1790,7 @@ function VisionAnalysis() {
               ) : null}
             </CardBody>
           </Card>
+          </ErrorBoundary>
         </VStack>
       </SimpleGrid>
 
@@ -1700,12 +1849,11 @@ function VisionAnalysis() {
         isOpen={proceedSoft !== null}
         leastDestructiveRef={proceedCancelRef}
         onClose={() => setProceedSoft(null)}
-        isCentered
       >
         <AlertDialogOverlay>
           <AlertDialogContent>
             <AlertDialogHeader fontSize="lg" fontWeight="bold">
-              Continue with partial coverage?
+              Some images are not fully analyzed
             </AlertDialogHeader>
             <AlertDialogBody>
               {proceedSoft && proceedSoft.semanticDone < proceedSoft.semanticTotal && (

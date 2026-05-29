@@ -411,11 +411,17 @@ export function ZonePriorityChart({ diagnostics }: ZonePriorityChartProps) {
               const i = props.index;
               if (Number.isNaN(x) || Number.isNaN(y) || i == null) return null;
               const d = data[i];
+              // v4.x — Defensive guard against white-screen: Recharts can call
+              // this label renderer with stale indices during data transitions
+              // (e.g. when the panorama view switch swaps the diagnostics
+              // array mid-render). Without this guard `d.mean_abs_z` throws
+              // and crashes the whole React tree.
+              if (!d || typeof d.mean_abs_z !== 'number') return null;
               return (
                 <text x={x + w + 6} y={y + h / 2}
                       dominantBaseline="central"
                       fontSize={11} fill="#1a202c" fontWeight={600}>
-                  {d.mean_abs_z.toFixed(2)} · n={d.point_count}
+                  {d.mean_abs_z.toFixed(2)} · n={d.point_count ?? 0}
                 </text>
               );
             }}
@@ -1709,7 +1715,13 @@ export function ClusterSizeChart({ archetypes }: ClusterSizeChartProps) {
   // shows the same numbers without requiring tooltip interaction.
   const data = useMemo(() => {
     const total = archetypes.reduce((s, a) => s + a.point_count, 0) || 1;
-    return archetypes.map((a) => ({
+    return archetypes.map((a, idx) => ({
+      // v4.x — Short x-axis tick label so all N clusters get a tick even
+      // when N is large (Recharts auto-skips long labels to avoid overlap,
+      // hiding clusters from view). Display "#<id>" on the axis; the full
+      // descriptive label goes in the tooltip + the inside-bar annotation
+      // below so nothing is lost.
+      shortName: `#${a.archetype_id ?? idx}`,
       name: a.archetype_label,
       count: a.point_count,
       sharePct: (a.point_count / total) * 100,
@@ -1719,15 +1731,31 @@ export function ClusterSizeChart({ archetypes }: ClusterSizeChartProps) {
 
   if (data.length === 0) return null;
 
+  // v4.x — Bottom margin scales with label count so even short "#N" ticks
+  // get enough room when many clusters are present.
+  const bottomMargin = data.length > 8 ? 50 : 30;
+
   return (
-    <ResponsiveContainer width="100%" height={300}>
-      <BarChart data={data} margin={{ left: 10, right: 10, top: 30, bottom: 5 }}>
+    <ResponsiveContainer width="100%" height={320}>
+      <BarChart data={data} margin={{ left: 10, right: 10, top: 30, bottom: bottomMargin }}>
         <CartesianGrid strokeDasharray="3 3" />
-        <XAxis dataKey="name" tick={{ fontSize: 10 }} />
+        <XAxis
+          dataKey="shortName"
+          tick={{ fontSize: 11, fontWeight: 600 }}
+          interval={0}  /* force every tick to render — no auto-skip */
+          height={30}
+        />
         <YAxis tick={{ fontSize: 10 }}
                label={{ value: 'Image count (points)', angle: -90,
                         position: 'insideLeft', fontSize: 10 }} />
         <Tooltip
+          // v4.x — Tooltip now shows the FULL descriptive archetype label
+          // (Cluster #N: <Road · features>) so users can still see what
+          // each short "#N" tick represents.
+          labelFormatter={(_label, payload) => {
+            const p = (payload?.[0]?.payload ?? {}) as { name?: string; shortName?: string };
+            return `${p.shortName ?? ''} — ${p.name ?? ''}`;
+          }}
           formatter={(v: number, _n: string, ctx: { payload?: { sharePct?: number } }) =>
             [`${v} · ${(ctx.payload?.sharePct ?? 0).toFixed(1)}%`, 'Count']
           }
@@ -1747,6 +1775,11 @@ export function ClusterSizeChart({ archetypes }: ClusterSizeChartProps) {
               const i = props.index;
               if (Number.isNaN(x) || Number.isNaN(y) || i == null) return null;
               const d = data[i];
+              // v4.x — Same defensive guard as the |z| LabelList above:
+              // Recharts can call this with stale indices during data
+              // transitions (panorama view switch swaps the cluster array
+              // mid-render). Crash here white-screens the whole tree.
+              if (!d || typeof d.count !== 'number' || typeof d.sharePct !== 'number') return null;
               return (
                 <text x={x + w / 2} y={y - 8}
                       textAnchor="middle" fontSize={10}
@@ -3263,18 +3296,33 @@ export function ClusterCentroidHeatmap({
 
         {archetypes.map((a, ri) => {
           const y = headerH + ri * cellH;
+          // v4.x — Defensive label fallback. After a panorama view switch +
+          // cluster re-run, the archetypes array can have entries with
+          // missing/null label or count for a render frame; without the
+          // fallback `.length` and `.toFixed()` on undefined throw and
+          // white-screen the whole Reports page.
+          const labelText = typeof a.archetype_label === 'string' ? a.archetype_label : `Cluster ${a.archetype_id ?? ri}`;
+          const pointCount = typeof a.point_count === 'number' ? a.point_count : 0;
+          // v4.x — Pair archetype_id with the row index. archetype_id is the
+          // natural identifier for the row, but the composite all_sub_clusters
+          // bucket can briefly emit duplicates during a stale render frame, and
+          // duplicate React keys silently drop rows / mis-align centroid colors.
+          // The `${id}-${ri}` form keeps the key human-readable while making it
+          // collision-proof against any upstream re-ID slip.
           return (
-            <g key={a.archetype_id}>
+            <g key={`${a.archetype_id ?? 'na'}-${ri}`}>
               <rect x={0} y={y} width={labelW} height={cellH} fill={ri % 2 ? '#F7FAFC' : '#FFFFFF'} />
               <text x={6} y={y + cellH / 2 + 4} fontSize={10} fontWeight="bold" fill="#2D3748">
-                <title>{`${a.archetype_label} · n=${a.point_count}`}</title>
-                {a.archetype_label.length > 18 ? a.archetype_label.slice(0, 18) + '…' : a.archetype_label}
+                <title>{`${labelText} · n=${pointCount}`}</title>
+                {labelText.length > 18 ? labelText.slice(0, 18) + '…' : labelText}
               </text>
               <text x={labelW - 6} y={y + cellH / 2 + 4} fontSize={9} textAnchor="end" fill="#718096">
-                n={a.point_count}
+                n={pointCount}
               </text>
               {indicators.map((ind, ci) => {
-                const z = a.centroid_z_scores[ind] ?? 0;
+                // Optional chain on the parent dict — a.centroid_z_scores
+                // can be undefined for malformed/stale archetypes.
+                const z = a.centroid_z_scores?.[ind] ?? 0;
                 const cx = labelW + ci * cellW;
                 return (
                   <g key={ind}>
@@ -3287,7 +3335,7 @@ export function ClusterCentroidHeatmap({
                       stroke="#E2E8F0"
                       strokeWidth={0.5}
                     >
-                      <title>{`${a.archetype_label} · ${ind}: z = ${z.toFixed(2)}`}</title>
+                      <title>{`${labelText} · ${ind}: z = ${z.toFixed(2)}`}</title>
                     </rect>
                     <text
                       x={cx + cellW / 2}
@@ -3396,7 +3444,12 @@ export function SilhouettePerPointPlot({
           const out = (
             <g key={g.cluster_id}>
               <text x={labelW} y={groupY0 + groupH / 2 + 3} fontSize={10} fontWeight="bold" textAnchor="end" fill="#2D3748">
-                {arch ? (arch.archetype_label.length > 18 ? arch.archetype_label.slice(0, 18) + '…' : arch.archetype_label) : `Cluster ${g.cluster_id}`}
+                {/* v4.x — `arch` may be present but with undefined label
+                    (malformed archetype after view-switch hydration).
+                    Optional-chain on `.length` to avoid white-screen. */}
+                {arch && typeof arch.archetype_label === 'string'
+                  ? (arch.archetype_label.length > 18 ? arch.archetype_label.slice(0, 18) + '…' : arch.archetype_label)
+                  : `Cluster ${g.cluster_id}`}
               </text>
               <text x={labelW} y={groupY0 + groupH / 2 + 16} fontSize={9} textAnchor="end" fill="#718096">
                 n = {g.points.length}

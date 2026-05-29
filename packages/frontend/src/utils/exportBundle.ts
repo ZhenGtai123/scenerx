@@ -45,6 +45,11 @@ export interface BundleOptions {
   aiReport?: string | null;
   /** Optional structured metadata about the AI report (model, word count). */
   aiReportMeta?: Record<string, unknown> | null;
+  /** Optional design strategies payload (per-view). Written as
+   * design_strategies.json (raw) and design_strategies.md (flattened
+   * human-readable). Mirrors the backend nature-bundle layout so a paper
+   * draft template can swap sources without changing file names. */
+  designStrategies?: Record<string, unknown> | null;
   /** Extra metadata fields merged into metadata.json. */
   extraMetadata?: Record<string, unknown>;
   /** If true, also capture every chart card as a PNG via html2canvas
@@ -473,6 +478,51 @@ export async function exportBundle(opts: BundleOptions): Promise<{
     root.file('report.md', opts.aiReport);
   }
 
+  // v4.x — Design strategies: write JSON (raw payload) + MD (flattened).
+  // Mirrors backend nature-bundle so a paper template can read either.
+  // Unknown shape → skip the MD flattening but still emit the JSON so the
+  // data isn't lost. Wrapped in a guard because designStrategies is
+  // optional and may be null/undefined.
+  let designStrategiesWritten = false;
+  if (opts.designStrategies && typeof opts.designStrategies === 'object') {
+    const ds = opts.designStrategies as Record<string, unknown>;
+    root.file('design_strategies.json', JSON.stringify(ds, null, 2));
+    const stratsRaw = (ds.strategies ?? ds.items) as unknown;
+    const lines: string[] = [
+      `# Design Strategies — ${opts.projectName ?? slug}`,
+      '',
+      `- Grouping mode: ${opts.groupingMode}`,
+      `- Generated: ${new Date().toISOString()}`,
+      '',
+    ];
+    if (Array.isArray(stratsRaw) && stratsRaw.length > 0) {
+      stratsRaw.forEach((s, i) => {
+        if (!s || typeof s !== 'object') return;
+        const obj = s as Record<string, unknown>;
+        const title = (obj.title as string) || (obj.name as string) || `Strategy ${i + 1}`;
+        lines.push(`## ${i + 1}. ${title}`);
+        if (obj.category) lines.push(`- Category: ${obj.category as string}`);
+        if (obj.priority) lines.push(`- Priority: ${obj.priority as string}`);
+        if (obj.description) { lines.push(''); lines.push(String(obj.description)); }
+        const steps = (obj.implementation_steps ?? obj.steps) as unknown;
+        if (Array.isArray(steps) && steps.length > 0) {
+          lines.push('');
+          lines.push('**Implementation steps:**');
+          steps.forEach((st) => lines.push(`- ${String(st)}`));
+        }
+        lines.push('');
+      });
+    } else {
+      lines.push(
+        'Strategies payload uses a non-standard shape; see ' +
+        '`design_strategies.json` for the raw data.',
+        '',
+      );
+    }
+    root.file('design_strategies.md', lines.join('\n'));
+    designStrategiesWritten = true;
+  }
+
   const metadata = {
     project_slug: slug,
     project_name: opts.projectName ?? null,
@@ -480,6 +530,7 @@ export async function exportBundle(opts: BundleOptions): Promise<{
     generated_at: new Date().toISOString(),
     ai_report_present: !!opts.aiReport,
     ai_report_meta: opts.aiReportMeta ?? null,
+    design_strategies_present: designStrategiesWritten,
     chart_count: chartCount,
     csv_count: csvCount,
     png_count: pngCount,
@@ -489,19 +540,54 @@ export async function exportBundle(opts: BundleOptions): Promise<{
   };
   root.file('metadata.json', JSON.stringify(metadata, null, 2));
 
+  // v4.x — Baseline section at the top of README so anyone opening the ZIP
+  // sees what view/baseline produced these numbers, before reading anything
+  // else. The same project can produce many bundles (one per panorama view
+  // × viewId) and their |z| / z-score / correlation values are NOT directly
+  // comparable across bundles (each view computes mean/std against its own
+  // grouping-unit pool). Spelling this out at the top prevents the most
+  // common audit mistake: cross-bundle numeric comparison without aligning
+  // baselines.
+  const md = opts.extraMetadata as Record<string, unknown> | undefined;
+  const panoramaView = typeof md?.panorama_view === 'string' ? md.panorama_view : null;
+  const viewId = typeof md?.view_id === 'string' ? md.view_id : null;
+  const baselineLabel = typeof md?.baseline_label === 'string' ? md.baseline_label : null;
+  const baselineUnits = typeof md?.baseline_units === 'number' ? md.baseline_units : null;
+  const baselineSection = (panoramaView || viewId || baselineLabel)
+    ? `## ⚠ Baseline (read first)\n\n` +
+      (panoramaView ? `- **Panorama view**: \`${panoramaView}\`\n` : '') +
+      (viewId ? `- **View id**: \`${viewId}\`\n` : '') +
+      (baselineLabel ? `- **Baseline label**: ${baselineLabel}\n` : '') +
+      (baselineUnits != null ? `- **Baseline grouping units (N)**: ${baselineUnits}\n` : '') +
+      `\n` +
+      `All numeric values in this bundle — |z|, z-scores, correlations,\n` +
+      `radar profiles, chart axes labelled in standardised units — are\n` +
+      `calibrated against the baseline above. **Do NOT cross-compare**\n` +
+      `numbers in this bundle with numbers in bundles exported from a\n` +
+      `different panorama view or a different view id; mean/std are\n` +
+      `re-computed against each view's own set of grouping units, so the\n` +
+      `"same" unit gets different standardised values across bundles.\n` +
+      `Raw indicator values (in CSVs) are absolute and ARE comparable.\n\n`
+    : '';
+
   const readme =
     `# SceneRx export bundle\n\n` +
+    baselineSection +
     `- Project: ${opts.projectName ?? slug}\n` +
     `- Grouping mode: ${opts.groupingMode}\n` +
     `- Generated: ${metadata.generated_at}\n` +
     `- ${chartCount} chart(s), ${csvCount} CSV(s)` +
     (pngCount > 0 ? `, ${pngCount} PNG(s)` : '') +
-    `, ${summaryCount} AI summary file(s)\n\n` +
+    `, ${summaryCount} AI summary file(s)` +
+    (designStrategiesWritten ? `, design strategies included` : '') +
+    `\n\n` +
     `## Layout\n\n` +
-    `\`\`\`\n${folderName}/\n├── charts/      # SVG (vector chart only)${pngCount > 0 ? ' + optional PNG' : ''}\n` +
-    `├── data/        # CSV tables matching each chart\n` +
-    `├── summaries/   # AI "What this means" JSON per chart\n` +
-    `├── report.md    # AI-generated narrative report (only if present)\n` +
+    `\`\`\`\n${folderName}/\n├── charts/                # SVG (vector chart only)${pngCount > 0 ? ' + optional PNG' : ''}\n` +
+    `├── data/                  # CSV tables matching each chart\n` +
+    `├── summaries/             # AI "What this means" JSON per chart\n` +
+    `├── report.md              # AI-generated narrative report (only if present)\n` +
+    `├── design_strategies.md   # Flattened design strategies (only if present)\n` +
+    `├── design_strategies.json # Raw strategies payload (only if present)\n` +
     `└── metadata.json\n\`\`\`\n\n` +
     `## Notes\n\n` +
     `- **SVG** = pure vector chart only — best for re-editing in Illustrator /\n` +
@@ -511,6 +597,9 @@ export async function exportBundle(opts: BundleOptions): Promise<{
     `- **summaries/*.json** = the LLM's structured interpretation of each\n` +
     `  chart (overall · key findings · per-unit breakdown · design\n` +
     `  implication). Use to seed figure captions or as supplementary text.\n` +
+    `- **report.md** / **design_strategies.*** = downstream AI deliverables\n` +
+    `  tied to the panorama view + view id in metadata.json. Absent if not\n` +
+    `  generated for this drill yet.\n` +
     `- CSVs use UTF-8 with BOM so Excel on Windows opens non-ASCII labels\n` +
     `  without mojibake.\n` +
     `- File names are stable: regenerating with the same chart_id and\n` +

@@ -91,6 +91,9 @@ class ProjectUpdate(BaseModel):
     subdimensions: Optional[list[str]] = None
     spatial_zones: Optional[list[SpatialZoneCreate]] = None
     spatial_relations: Optional[list[SpatialRelation]] = None
+    # Panorama view scoping — see ProjectResponse for full semantics.
+    active_panorama_views: Optional[list[str]] = None
+    active_panorama_view: Optional[str] = None
 
 
 class ProjectResponse(BaseModel):
@@ -156,6 +159,36 @@ class ProjectResponse(BaseModel):
     # older clients.
     design_strategy_results: dict[str, Optional[dict[str, Any]]] = Field(default_factory=dict)
     analysis_results_updated_at: Optional[datetime] = None
+
+    # v4.x — Panorama per-view pipeline scoping.
+    # `active_panorama_views` is the user's choice in Vision Analysis of which
+    # panorama views (subset of ["left", "front", "right"]) participate in
+    # downstream indicator / clustering / report runs. Empty list means the
+    # project is not in panorama mode and runs the legacy single-view path
+    # unchanged. When non-empty, each selected view is treated as an
+    # INDEPENDENT report: the pipeline runs once per view with that view's
+    # masks aliased to the standard `semantic_map` slot, and the result is
+    # persisted under `panorama_view_results[view]`.
+    #
+    # `active_panorama_view` is the view the user is currently looking at on
+    # the Reports page. The pipeline mirrors `panorama_view_results[view]`
+    # back into the legacy top-level slots (zone_analysis_result,
+    # ai_reports, design_strategy_results, …) so the existing Reports
+    # rendering path keeps working without per-component changes.
+    active_panorama_views: list[str] = Field(default_factory=list)
+    active_panorama_view: Optional[str] = None
+    # Per-view full result bucket. Schema of each value mirrors the legacy
+    # top-level slots: {
+    #   "zone_analysis_result": dict | None,
+    #   "ai_reports": {viewId → str},
+    #   "ai_report_metas": {viewId → dict},
+    #   "design_strategy_results": {viewId → dict},
+    #   "selected_indicators": list[dict],
+    #   "analysis_results_updated_at": isoformat str | None,
+    # }
+    # Stored as opaque dicts to avoid coupling project.py to the larger
+    # analysis-model graph (same reasoning as zone_analysis_result above).
+    panorama_view_results: dict[str, dict[str, Any]] = Field(default_factory=dict)
 
 
 class ProjectQuery(BaseModel):

@@ -29,6 +29,7 @@ import type { UploadedImage } from '../types';
 import PageShell from '../components/PageShell';
 import EmptyState from '../components/EmptyState';
 import { ZoneImageTile, UngroupedImageTile } from '../components/ImageTile';
+import { ErrorBoundary } from '../components/ErrorBoundary';
 
 function ProjectDetail() {
   const { projectId } = useParams<{ projectId: string }>();
@@ -524,7 +525,11 @@ function ProjectDetail() {
       )}
 
       {/* Bulk Upload */}
+      {/* v4.x — ErrorBoundary around the upload card so a crash in file
+          handling / drag-drop logic doesn't take out the image grids
+          below it. */}
       {!uploading && hasZones && (
+        <ErrorBoundary label="Bulk Upload card">
         <Card mb={4}>
           <CardBody py={3}>
             <HStack spacing={4}>
@@ -599,13 +604,19 @@ function ProjectDetail() {
             </Box>
           </CardBody>
         </Card>
+        </ErrorBoundary>
       )}
 
       {/* Zone cards with images */}
+      {/* v4.x — Wrap each zone card with its own ErrorBoundary keyed on
+          zone_id so one zone's image grid crashing doesn't take out the
+          others. ImageTile rendering, virtualized grids, and zone-type
+          tags are the crash surfaces here. */}
       {project.spatial_zones.map(zone => {
         const zoneImages = zoneImagesMap[zone.zone_id] || [];
         const isThisZoneUploading = zoneUploading === zone.zone_id;
         return (
+          <ErrorBoundary key={zone.zone_id} label={`Zone "${zone.zone_name}" image grid`}>
           <Card key={zone.zone_id} mb={3}>
             <CardHeader py={3}>
               <HStack justify="space-between">
@@ -689,6 +700,7 @@ function ProjectDetail() {
               )}
             </CardBody>
           </Card>
+          </ErrorBoundary>
         );
       })}
 
@@ -699,6 +711,7 @@ function ProjectDetail() {
 
       {/* Ungrouped Images */}
       {ungroupedImages.length > 0 && (
+        <ErrorBoundary label="Ungrouped Images panel">
         <Card mb={4}>
           <CardHeader py={3}>
             <HStack justify="space-between" flexWrap="wrap" gap={2}>
@@ -818,6 +831,7 @@ function ProjectDetail() {
             )}
           </CardBody>
         </Card>
+        </ErrorBoundary>
       )}
 
       {/* Navigation */}

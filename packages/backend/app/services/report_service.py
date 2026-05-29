@@ -385,6 +385,13 @@ class ReportService:
         # prompt can surface it as a caveat in Section 6 instead of returning
         # generic boilerplate.
         za = request.zone_analysis
+        # v6.2 — honor the requested view. The zone-view payload can carry
+        # segment_diagnostics (clustering persists the archetypes at the top
+        # level of zone_analysis_result for chart rendering). Drop it unless
+        # this request is for a cluster-derived view so the Stage 2 prompt
+        # summary lists the user's real zones, not the cluster archetypes.
+        if request.grouping_mode != "clusters" and za.segment_diagnostics:
+            za = za.model_copy(update={"segment_diagnostics": None})
         is_image_level = (za.analysis_mode or "zone_level") == "image_level"
         all_zero_deviation = bool(
             za.zone_diagnostics
@@ -397,7 +404,7 @@ class ReportService:
         )
         stage1_data = self._prepare_stage1(request.stage1_recommendations)
         stage2_data = self._prepare_stage2(
-            request.zone_analysis, request.stage1_recommendations
+            za, request.stage1_recommendations
         )
         stage3_data = self._prepare_stage3(request.design_strategies)
         encoding_ref = json.dumps(

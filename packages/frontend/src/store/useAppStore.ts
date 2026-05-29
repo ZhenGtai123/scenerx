@@ -43,7 +43,16 @@ export interface StartPipelineArgs {
   projectId: string;
   projectName: string;
   indicatorIds: string[];
-  useLlm: boolean;
+  /** @deprecated v4.x — Stage 3 (LLM design strategies) is no longer run in the
+   *  pipeline; it fires on demand from the Reports page entry gate's Generate
+   *  buttons. Flag kept as an optional no-op for backward compat with any
+   *  caller still passing it. */
+  useLlm?: boolean;
+  /** v4.x — Subset of ["left", "front", "right"] for panorama projects.
+   *  When non-empty, the pipeline runs SEQUENTIALLY once per view (each view
+   *  produces its own independent zone_analysis + report bucket). When
+   *  empty or omitted, runs the legacy single-view path once. */
+  panoramaViews?: string[];
   onComplete?: (result: ProjectPipelineResult) => void;
   onError?: (message: string) => void;
 }
@@ -346,9 +355,43 @@ export const useAppStore = create<AppState>()(persist((set, get) => ({
     // VisionAnalysis page renders previews immediately on mount, instead
     // of inheriting the previous project's masks until that page's own
     // restoration effect runs.
-    const maskResults = (project.uploaded_images ?? [])
-      .filter((img) => img.mask_filepaths && Object.keys(img.mask_filepaths).length > 0)
-      .map((img) => ({ imageId: img.image_id, maskPaths: img.mask_filepaths }));
+    //
+    // Panorama-aware split: backend persists panorama masks under
+    // view-prefixed keys (`left_semantic_map`, `front_depth_map`, …) on the
+    // SAME image record, but the on-disk URL builder expects
+    //   /api/masks/{project}/{image_id}_{view}/{key}.png
+    // (i.e. view embedded in the directory name, raw key in the file name).
+    // Without splitting here, the previously-flat hydration produced
+    // entries like { imageId: "imgX", maskPaths: { left_semantic_map: ... }}
+    // and every consumer that built a URL from them hit a 404 because the
+    // file actually lives at `/api/masks/{project}/imgX_left/semantic_map.png`.
+    // Mirrors the per-view restoration in VisionAnalysis.tsx (which gates on
+    // an empty maskResults array; running the split here is what allows that
+    // gate to short-circuit safely).
+    const PANORAMA_VIEW_RE = /^(left|front|right)_(.+)$/;
+    const maskResults: { imageId: string; maskPaths: Record<string, string> }[] = [];
+    for (const img of project.uploaded_images ?? []) {
+      if (!img.mask_filepaths || Object.keys(img.mask_filepaths).length === 0) continue;
+      const standardPaths: Record<string, string> = {};
+      const viewPaths: Record<string, Record<string, string>> = {};
+      for (const [key, path] of Object.entries(img.mask_filepaths)) {
+        const m = key.match(PANORAMA_VIEW_RE);
+        if (m) {
+          const view = m[1];
+          const rest = m[2];
+          if (!viewPaths[view]) viewPaths[view] = {};
+          viewPaths[view][rest] = path;
+        } else {
+          standardPaths[key] = path;
+        }
+      }
+      if (Object.keys(standardPaths).length > 0) {
+        maskResults.push({ imageId: img.image_id, maskPaths: standardPaths });
+      }
+      for (const [view, paths] of Object.entries(viewPaths)) {
+        maskResults.push({ imageId: `${img.image_id}_${view}`, maskPaths: paths });
+      }
+    }
 
     // pipelineResult is session-only metadata about the latest pipeline run
     // (skipped images, calc counts). It is NOT persisted server-side. Two
@@ -395,14 +438,68 @@ export const useAppStore = create<AppState>()(persist((set, get) => ({
     const preservedSingleZoneStrategy = sameProject ? state.singleZoneStrategy : null;
     const preservedMultiZoneStrategy = sameProject ? state.multiZoneStrategy : null;
 
-    // The active zoneAnalysisResult might be the cluster-derived view (set
-    // by handleRunClustering), which isn't persisted to the project payload.
-    // When refetching the same project, keep whichever view the user is in.
+    // v4.x — Derive cluster state from the project payload's sub-keys.
+    // The clustering endpoints (single-zone `/clustering/by-project` and
+    // multi-zone `/clustering/within-zones`) persist their outputs into
+    // sub-keys of `project.zone_analysis_result`:
+    //   • `cluster_view`     → the cluster-as-zone Stage 2.5 payload
+    //   • `clustering`       → the raw ClusteringResult (k, archetypes, …)
+    //   • `analysis_views`   → multi-view dict from within-zone clustering
+    //                          (parent_zones, all_sub_clusters, within_zone:*)
+    // The per-panorama-view mirror in update_project carries these sub-keys
+    // along when the user switches view (because they're inside the
+    // mirrored zone_analysis_result dict), so coming back to a previously-
+    // clustered view should restore the in-memory cluster snapshots WITHOUT
+    // forcing the user to re-cluster.
+    //
+    // Before this hydration logic, switching panorama view cleared
+    // clusterAnalysisResult / analysisViewsByViewId in the store and there
+    // was no path to rehydrate them — so Cluster view would dump the user
+    // into the "Re-run clustering" hint card every time.
+    const projZar = project.zone_analysis_result as Record<string, unknown> | null | undefined;
+    const projClusterView = projZar?.cluster_view as ZoneAnalysisResult | undefined;
+    const projAnalysisViews = projZar?.analysis_views as Record<string, ZoneAnalysisResult> | undefined;
+
+    // Cluster snapshot: prefer the in-memory state IF the user is in cluster
+    // view AND the in-memory state is set (same-session continuity). Else
+    // derive from project.zone_analysis_result.cluster_view (cross-session
+    // or cross-view restore).
     const inClusterView =
       sameProject && state.groupingMode === 'clusters' && !!state.clusterAnalysisResult;
-    const nextZoneAnalysis = inClusterView
+    const derivedClusterAnalysis = projClusterView ?? null;
+    const nextClusterAnalysis = inClusterView
       ? state.clusterAnalysisResult
-      : project.zone_analysis_result ?? null;
+      : derivedClusterAnalysis;
+
+    // Active zoneAnalysisResult: if grouping mode says clusters AND we have
+    // a cluster snapshot (either in-memory or freshly-derived), show the
+    // cluster-rebuilt analysis; else show the raw zone analysis.
+    const nextZoneAnalysis = (preservedGroupingMode === 'clusters' && nextClusterAnalysis)
+      ? nextClusterAnalysis
+      : (project.zone_analysis_result as ZoneAnalysisResult | null | undefined) ?? null;
+
+    // Multi-view dict: prefer in-memory (set fresh by within-zones endpoint
+    // this session) over the persisted version, but always have SOMETHING
+    // if the project carries persisted views — Cluster view's segmented
+    // control needs at least the persisted shape to render after a view
+    // switch round-trip.
+    const inMemoryAnalysisViews = sameProject ? state.analysisViewsByViewId : {};
+    const hasInMemoryViews = Object.keys(inMemoryAnalysisViews ?? {}).length > 0;
+    const nextAnalysisViews = hasInMemoryViews
+      ? inMemoryAnalysisViews
+      : (projAnalysisViews ?? {});
+
+    // User-zone snapshot (raw pre-clustering analysis): if the project has
+    // a cluster_view, the raw analysis is still the OUTER zone_analysis_result
+    // dict (cluster_view is just a sub-key). We strip the cluster_view +
+    // analysis_views sub-keys to get the pristine zone view, matching what
+    // handleRunClustering saves into userZoneAnalysisResult before swapping.
+    let derivedUserZone: ZoneAnalysisResult | null = null;
+    if (projZar) {
+      const { cluster_view: _cv, analysis_views: _av, clustering: _cl, segment_diagnostics: _sd, ...rest } = projZar as Record<string, unknown>;
+      derivedUserZone = (rest as ZoneAnalysisResult) ?? null;
+    }
+    const nextUserZone = preservedUserZone ?? derivedUserZone;
 
     // v4 / Phase B — hydrate per-view AI reports / strategies / analysis
     // views from the project payload's open-string-keyed dicts. Replaces
@@ -457,14 +554,16 @@ export const useAppStore = create<AppState>()(persist((set, get) => ({
       aiReportMeta: activeMeta,
       aiReportsByViewId,
       aiReportMetasByViewId,
-      // analysis_views is freshly populated by /clustering/within-zones
-      // each session — not persisted on the project record. Reset on
-      // hydrate so a stale dict from one session doesn't leak into another.
-      analysisViewsByViewId: {},
+      // v4.x — multi-view dict is now persisted in zone_analysis_result.analysis_views
+      // by the within-zones endpoint; hydrate from there if in-memory is empty.
+      // This is what makes "switch panorama view, come back, clusters still
+      // here" work — the persisted views ride along with the per-view
+      // zone_analysis_result mirror in update_project.
+      analysisViewsByViewId: nextAnalysisViews,
       activeViewId,
       groupingMode: preservedGroupingMode,
-      userZoneAnalysisResult: preservedUserZone,
-      clusterAnalysisResult: preservedClusterAnalysis,
+      userZoneAnalysisResult: nextUserZone,
+      clusterAnalysisResult: nextClusterAnalysis,
       singleZoneStrategy: preservedSingleZoneStrategy,
       multiZoneStrategy: preservedMultiZoneStrategy,
     };
@@ -480,7 +579,7 @@ export const useAppStore = create<AppState>()(persist((set, get) => ({
     activeAbortController = null;
   },
 
-  startPipeline: async ({ projectId, projectName, indicatorIds, useLlm, onComplete, onError }) => {
+  startPipeline: async ({ projectId, projectName, indicatorIds, panoramaViews, onComplete, onError }) => {
     if (get().pipelineRun.isRunning) {
       // Don't allow concurrent pipelines from the same client. Caller should
       // gate UI on `pipelineRun.isRunning` so this branch is rarely hit.
@@ -506,51 +605,105 @@ export const useAppStore = create<AppState>()(persist((set, get) => ({
     let finalResult: ProjectPipelineResult | null = null;
     let errorMessage: string | null = null;
 
-    try {
-      await api.analysis.runProjectPipelineStream(
-        { project_id: projectId, indicator_ids: indicatorIds, run_stage3: true, use_llm: useLlm },
-        (ev: ProjectPipelineStreamEvent) => {
-          // Use functional set to compose with the latest steps array — avoids
-          // racing with concurrent progress events.
-          if (ev.type === 'progress') {
-            set((s) => ({
-              pipelineRun: {
-                ...s.pipelineRun,
-                imageProgress: {
-                  current: ev.current,
-                  total: ev.total,
-                  filename: ev.image_filename,
-                  succeeded: ev.succeeded,
-                  failed: ev.failed,
-                  cached: ev.cached,
-                },
-              },
-            }));
-          } else if (ev.type === 'status') {
-            set((s) => {
-              const prev = s.pipelineRun.steps;
-              const idx = prev.findIndex(x => x.step === ev.step);
-              const next = { step: ev.step, status: ev.status, detail: ev.detail };
-              const steps = idx >= 0
-                ? prev.map((x, i) => (i === idx ? next : x))
-                : [...prev, next];
-              return { pipelineRun: { ...s.pipelineRun, steps } };
-            });
-          } else if (ev.type === 'result') {
-            finalResult = ev.data;
-          } else if (ev.type === 'error') {
-            errorMessage = ev.message;
-          }
-        },
-        controller.signal,
-      );
-    } catch (err: unknown) {
-      if (err instanceof DOMException && err.name === 'AbortError') {
-        set({ pipelineRun: initialPipelineRun });
-        activeAbortController = null;
-        return;
+    // v4.x — Panorama per-view loop. When `panoramaViews` is non-empty we run
+    // the pipeline SEQUENTIALLY once per view, each with the corresponding
+    // `panorama_view` query parameter so the backend aliases that view's
+    // masks back to the standard slots and persists results into the
+    // view's bucket. When empty/undefined, fall back to the legacy
+    // single-shot path (one pipeline run, no panorama scoping). The loop
+    // bails on the first error; partial progress is left intact (the
+    // backend has already persisted whichever views completed successfully).
+    const viewSequence: (string | null)[] = (panoramaViews && panoramaViews.length > 0)
+      ? [...panoramaViews]
+      : [null];
+
+    for (let i = 0; i < viewSequence.length; i++) {
+      const view = viewSequence[i];
+
+      // Reset the steps + image progress at the start of each view's run so
+      // the user sees the new view's progress from scratch (rather than
+      // stale steps from the previous view). For single-view runs this is a
+      // no-op since the initial state is already empty.
+      if (i > 0) {
+        set((s) => ({
+          pipelineRun: {
+            ...s.pipelineRun,
+            steps: [],
+            imageProgress: null,
+            errorMessage: null,
+          },
+        }));
       }
-      errorMessage = extractErrorMessage(err, 'Pipeline failed');
+
+      try {
+        await api.analysis.runProjectPipelineStream(
+          {
+            project_id: projectId,
+            indicator_ids: indicatorIds,
+            // v4.x — Analysis pipeline is calc-only. Stage 3 (LLM design
+            // strategies) fires on demand from the Reports page entry gate's
+            // Generate buttons. Explicit `run_stage3: false` documents intent
+            // for any future contributor reading this. Backend has skipped
+            // Stage 3 unconditionally since v4/Module 14, but sending the
+            // flag belt-and-braces guards against regressions if a contributor
+            // ever resurrects the gated branch.
+            run_stage3: false,
+            ...(view !== null ? { panorama_view: view } : {}),
+          },
+          (ev: ProjectPipelineStreamEvent) => {
+            // Use functional set to compose with the latest steps array — avoids
+            // racing with concurrent progress events.
+            if (ev.type === 'progress') {
+              set((s) => ({
+                pipelineRun: {
+                  ...s.pipelineRun,
+                  imageProgress: {
+                    current: ev.current,
+                    total: ev.total,
+                    filename: ev.image_filename,
+                    succeeded: ev.succeeded,
+                    failed: ev.failed,
+                    cached: ev.cached,
+                  },
+                },
+              }));
+            } else if (ev.type === 'status') {
+              set((s) => {
+                const prev = s.pipelineRun.steps;
+                const idx = prev.findIndex(x => x.step === ev.step);
+                const labelSuffix = view ? ` [view: ${view}]` : '';
+                const next = {
+                  step: ev.step,
+                  status: ev.status,
+                  detail: ev.detail + labelSuffix,
+                };
+                const steps = idx >= 0
+                  ? prev.map((x, i2) => (i2 === idx ? next : x))
+                  : [...prev, next];
+                return { pipelineRun: { ...s.pipelineRun, steps } };
+              });
+            } else if (ev.type === 'result') {
+              finalResult = ev.data;
+            } else if (ev.type === 'error') {
+              errorMessage = ev.message;
+            }
+          },
+          controller.signal,
+        );
+      } catch (err: unknown) {
+        if (err instanceof DOMException && err.name === 'AbortError') {
+          set({ pipelineRun: initialPipelineRun });
+          activeAbortController = null;
+          return;
+        }
+        errorMessage = extractErrorMessage(err, `Pipeline failed${view ? ` (view: ${view})` : ''}`);
+        break;
+      }
+
+      // If the SSE handler captured an error event for THIS view, bail
+      // before queuing the next view — better to leave the user with a
+      // clear error than silently churn through remaining views.
+      if (errorMessage) break;
     }
 
     activeAbortController = null;
@@ -664,4 +817,5 @@ export const useAppStore = create<AppState>()(persist((set, get) => ({
   }),
 }));
 
+// v4.x — Analysis pipeline is calc-only; LLM + clustering deferred to Reports.
 export default useAppStore;

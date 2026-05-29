@@ -203,6 +203,18 @@ class ClusteringResult(BaseModel):
     # HDBSCAN condensed-tree edges for D3 visualization.
     # Each edge: {parent: int, child: int, lambda_val: float, child_size: int}.
     condensed_tree: list[dict] = Field(default_factory=list)
+    # ── v6.2 — cluster-validity diagnostics (tendency · gap · stability) ──
+    # Hopkins clustering-tendency on the standardised feature matrix:
+    # ~0.5 = no structure (uniform cloud), → 1.0 = strong cluster structure.
+    hopkins_statistic: Optional[float] = None
+    # Tibshirani gap statistic per k: [{k, gap, s_k, is_selected}].
+    # Independent K-validity criterion; does not override the chosen k.
+    gap_statistic: list[dict] = Field(default_factory=list)
+    # Hennig bootstrap stability: cluster_id (str) → mean Jaccard over
+    # bootstrap resamples. ≥0.85 highly stable, 0.75-0.85 stable,
+    # 0.60-0.75 a pattern, <0.60 unstable / dissolved.
+    cluster_stability: dict[str, float] = Field(default_factory=dict)
+    cluster_stability_method: str = ""
 
 
 class ZoneAnalysisResult(BaseModel):
@@ -416,6 +428,15 @@ class ProjectPipelineRequest(BaseModel):
     use_llm: bool = False
     max_ioms_per_query: int = Field(default=6, ge=1, le=20)
     max_strategies_per_zone: int = Field(default=5, ge=1, le=10)
+    # v4.x — Panorama per-view scoping. When set to one of
+    # ("left", "front", "right"), the pipeline aliases each image's
+    # `{view}_semantic_map` / `{view}_depth_map` keys back to the standard
+    # `semantic_map` / `depth_map` slots that the existing calculators
+    # consume, then persists results into `project.panorama_view_results
+    # [panorama_view]` AND mirrors them into the legacy top-level slots
+    # (with `project.active_panorama_view` updated to match). When left as
+    # None, the legacy single-view path runs unchanged.
+    panorama_view: Optional[str] = None
 
 
 class ProjectPipelineProgress(BaseModel):

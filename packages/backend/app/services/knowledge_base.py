@@ -134,6 +134,8 @@ class KnowledgeBase:
         ctx_links_resolved = 0
         for ctx in contexts:
             for rid in ctx.get('linked_records', []):
+                if not isinstance(rid, str):
+                    continue
                 if rid.startswith('SVCs_P_'):
                     # Legacy/inline form — the linked record IS an evidence ID.
                     self._context_by_evidence[rid] = ctx
@@ -238,7 +240,7 @@ class KnowledgeBase:
                     continue
                 item: dict = {
                     "name": entry.get("name", code),
-                    "definition": entry.get("definition", "")[:200],
+                    "definition": (entry.get("definition") or "")[:200],
                 }
                 if name == "A_indicators":
                     if entry.get("formula"):
@@ -300,7 +302,7 @@ class KnowledgeBase:
                     continue
                 item: dict = {
                     "name": entry.get("name", code),
-                    "definition": entry.get("definition", "")[:200],
+                    "definition": (entry.get("definition") or "")[:200],
                 }
                 if name == "A_indicators":
                     if entry.get("formula"):
@@ -321,6 +323,30 @@ class KnowledgeBase:
     def get_indicator_definitions(self) -> list[dict]:
         """Get indicator definitions from codebook"""
         return self.appendix.get('A_indicators', [])
+
+    def is_recommendable(self, indicator_id: str) -> bool:
+        """Whether an indicator may be offered by the recommender.
+
+        Single source of truth = the codebook (Encoding_Dictionary.json ->
+        A_indicators) `status` field. No hardcoded id list lives in the
+        recommender; eligibility follows the data:
+
+          - present with status 'active' (or no `status` field at all, which
+            defaults to active for backward compatibility) -> recommendable
+          - present with any other status (e.g. 'future_development',
+            'unsupported') -> excluded; kept as a future/manual indicator
+          - absent from the codebook entirely (e.g. legacy/phantom ids like
+            IND_GVI_ANG that linger in evidence but have no canonical
+            definition) -> not recommendable
+
+        Excluding here governs only the evidence-driven recommendation
+        candidate pool; users may still select excluded indicators manually.
+        """
+        indicators = self.appendix.get('A_indicators', {}) if isinstance(self.appendix, dict) else {}
+        entry = indicators.get(indicator_id) if isinstance(indicators, dict) else None
+        if not isinstance(entry, dict):
+            return False
+        return str(entry.get('status', 'active')).strip().lower() == 'active'
 
     def get_performance_dimensions(self) -> list[dict]:
         """Get performance dimensions from codebook"""

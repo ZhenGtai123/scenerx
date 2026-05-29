@@ -21630,7 +21630,7 @@
         "test_type_id": "TST_PEA",
         "test_description": "Definition record only"
       },
-      "description": "Foreground Edge Roughness Index (S_ERI) defined/used by paper; no inferential association recorded in this minimal record."
+      "description": "S_ERI (S_ERI) defined/used by paper; no inferential association recorded in this minimal record."
     },
     "study_design": {
       "design_type_id": "DES_CRS",
@@ -21644,7 +21644,7 @@
       "confidence_grade_id": "CON_MED"
     },
     "is_descriptive_statistic": false,
-    "descriptive_content": "Foreground Edge Roughness Index (S_ERI = 0.25 * P / sqrt(A)) is a relative-relationship shape metric derived from the isoperimetric inequality. In framed scenery the foreground holds regular outlines (low S_ERI) with smooth depth continuity (high P_ECI), and the two are positively correlated (r = 0.656, p < 0.01). Mean S_ERI = 1.634; Mdn = 0.986; 95% CI [1.300, 1.968]. Lower S_ERI values dominate framed scenery, supporting the design rule that framing structures need geometrically stable foreground outlines.",
+    "descriptive_content": "S_ERI (S_ERI = 0.25 * P / sqrt(A)) is a relative-relationship shape metric derived from the isoperimetric inequality. In framed scenery the foreground holds regular outlines (low S_ERI) with smooth depth continuity (high P_ECI), and the two are positively correlated (r = 0.656, p < 0.01). Mean S_ERI = 1.634; Mdn = 0.986; 95% CI [1.300, 1.968]. Lower S_ERI values dominate framed scenery, supporting the design rule that framing structures need geometrically stable foreground outlines.",
     "linked_iom_ids": [
       "I_SVCs_Lan2025_FG_ERI_L15"
     ]
@@ -21718,7 +21718,7 @@
         "test_type_id": "TST_RFR",
         "test_description": "Definition record only"
       },
-      "description": "Foreground Edge Contrast Index (S_ECI) defined/used by paper; no inferential association recorded in this minimal record."
+      "description": "S_ECI (S_ECI) defined/used by paper; no inferential association recorded in this minimal record."
     },
     "study_design": {
       "design_type_id": "DES_CRS",
@@ -21732,7 +21732,7 @@
       "confidence_grade_id": "CON_MED"
     },
     "is_descriptive_statistic": true,
-    "descriptive_content": "Foreground Edge Contrast Index (S_ECI = Pb / (Py + Pb)) quantifies how distinct the foreground is from its 8-neighborhood by counting label-consistent vs label-different boundary pixels; values near 0 mean foreground blends with surroundings, values near 1 mean strong distinction. The metric is reported descriptively as part of the relative-relationship shape family and contributes to discriminating obstructive/porous scenery (which use textural contrast) from framed/sandwiched scenery.",
+    "descriptive_content": "S_ECI (S_ECI = Pb / (Py + Pb)) quantifies how distinct the foreground is from its 8-neighborhood by counting label-consistent vs label-different boundary pixels; values near 0 mean foreground blends with surroundings, values near 1 mean strong distinction. The metric is reported descriptively as part of the relative-relationship shape family and contributes to discriminating obstructive/porous scenery (which use textural contrast) from framed/sandwiched scenery.",
     "linked_iom_ids": [
       "I_SVCs_Lan2025_FG_ECI_L15"
     ]
@@ -21808,7 +21808,7 @@
         "test_type_id": "TST_RFR",
         "test_description": "Definition record only"
       },
-      "description": "Foreground Hole-Shape Similarity Index (S_PSI) defined/used by paper; no inferential association recorded in this minimal record."
+      "description": "S_PSI (S_PSI) defined/used by paper; no inferential association recorded in this minimal record."
     },
     "study_design": {
       "design_type_id": "DES_CRS",
@@ -21822,7 +21822,7 @@
       "confidence_grade_id": "CON_MED"
     },
     "is_descriptive_statistic": true,
-    "descriptive_content": "Foreground Hole-Shape Similarity Index (S_PSI) is a distributional-trend metric defined as the coefficient of variation of the per-hole shape descriptor 0.25*Pi/sqrt(Ai), capturing how similar in shape the multiple holes inside the foreground are. Used to characterise porous scenery, which is described as 'balancing visual permeability with textural variation' through latticed or perforated foregrounds.",
+    "descriptive_content": "S_PSI (S_PSI) is a distributional-trend metric defined as the coefficient of variation of the per-hole shape descriptor 0.25*Pi/sqrt(Ai), capturing how similar in shape the multiple holes inside the foreground are. Used to characterise porous scenery, which is described as 'balancing visual permeability with textural variation' through latticed or perforated foregrounds.",
     "linked_iom_ids": [
       "I_SVCs_Lan2025_FG_PSI_L15"
     ]
@@ -21897,7 +21897,7 @@
         "test_type_id": "TST_RFR",
         "test_description": "Definition record only"
       },
-      "description": "Foreground Asymmetry / Profile Index (S_API) defined/used by paper; no inferential association recorded in this minimal record."
+      "description": "S_API (S_API) defined/used by paper; no inferential association recorded in this minimal record."
     },
     "study_design": {
       "design_type_id": "DES_CRS",
@@ -21911,7 +21911,7 @@
       "confidence_grade_id": "CON_MED"
     },
     "is_descriptive_statistic": true,
-    "descriptive_content": "Foreground Asymmetry / Profile Index (S_API) is a distributional-trend metric equal to the standard deviation of horizontal distances between left/right foreground outline pixels and the FOV vertical midline. Low S_API => bilateral symmetry, characteristic of sandwiched scenery (which 'creates bilateral symmetry with channeling effects'); high S_API => asymmetric profile.",
+    "descriptive_content": "S_API (S_API) is a distributional-trend metric equal to the standard deviation of horizontal distances between left/right foreground outline pixels and the FOV vertical midline. Low S_API => bilateral symmetry, characteristic of sandwiched scenery (which 'creates bilateral symmetry with channeling effects'); high S_API => asymmetric profile.",
     "linked_iom_ids": [
       "I_SVCs_Lan2025_FG_API_L15"
     ]
@@ -21989,7 +21989,7 @@
         "test_type_id": "TST_PEA",
         "test_description": "Definition record only"
       },
-      "description": "Foreground Largest-Hole Asymmetry Index (S_ADI) defined/used by paper; no inferential association recorded in this minimal record."
+      "description": "S_ADI (S_ADI) defined/used by paper; no inferential association recorded in this minimal record."
     },
     "study_design": {
       "design_type_id": "DES_CRS",
@@ -22003,7 +22003,7 @@
       "confidence_grade_id": "CON_MED"
     },
     "is_descriptive_statistic": false,
-    "descriptive_content": "Foreground Largest-Hole Asymmetry Index (S_ADI = (SDi - SDj)/SDi) quantifies whether one hole inside the foreground dominates the others. In framed scenery, mean S_ADI = 0.957, 95% CI [0.926, 0.988] (left-skewed near maximum 1, Sk = -3.806, K = 16.2) - i.e. there is normally one dominant 'frame opening' hole. Within framed scenery S_ADI correlates negatively with P_ECI (r = -0.66, p < 0.01), meaning when a single hole dominates the foreground (high S_ADI), depth continuity P_ECI tends to be lower (smoother depth transition through that single window). Author also reports S_ADI accounts for ~12.1% feature importance and S_VFR ~9.9% in the random-forest archetype classifier.",
+    "descriptive_content": "S_ADI (S_ADI = (SDi - SDj)/SDi) quantifies whether one hole inside the foreground dominates the others. In framed scenery, mean S_ADI = 0.957, 95% CI [0.926, 0.988] (left-skewed near maximum 1, Sk = -3.806, K = 16.2) - i.e. there is normally one dominant 'frame opening' hole. Within framed scenery S_ADI correlates negatively with P_ECI (r = -0.66, p < 0.01), meaning when a single hole dominates the foreground (high S_ADI), depth continuity P_ECI tends to be lower (smoother depth transition through that single window). Author also reports S_ADI accounts for ~12.1% feature importance and S_VFR ~9.9% in the random-forest archetype classifier.",
     "linked_iom_ids": [
       "I_SVCs_Lan2025_FG_ADI_L15"
     ]
@@ -22408,7 +22408,7 @@
         "test_type_id": "TST_PEA",
         "test_description": "Definition record only"
       },
-      "description": "Foreground Maximum Depth Value (P_LV) defined/used by paper; no inferential association recorded in this minimal record."
+      "description": "P_LV (P_LV) defined/used by paper; no inferential association recorded in this minimal record."
     },
     "study_design": {
       "design_type_id": "DES_CRS",
@@ -22422,7 +22422,7 @@
       "confidence_grade_id": "CON_MED"
     },
     "is_descriptive_statistic": false,
-    "descriptive_content": "Foreground Maximum Depth Value (P_LV = max Di in foreground) is an absolute-value position metric on a 1-256 grayscale derived from MiDaS monocular depth maps. In framed scenery, mean P_LV = 136.185; Mdn = 148.5; 95% CI [250.213, 254.343]; 'above median of 128' indicates extended depth in the foreground. P_LV correlates positively with P_LN (r = 0.656, p < 0.01): foregrounds that start near the observer also extend deep in. In random-forest models, P_LV contributes ~24.3% feature importance for obstructive scenery, reflecting that obstructive scenery 'utilizes systematic positioning with texture contrasts' anchored at high P_LV.",
+    "descriptive_content": "P_LV (P_LV = max Di in foreground) is an absolute-value position metric on a 1-256 grayscale derived from MiDaS monocular depth maps. In framed scenery, mean P_LV = 136.185; Mdn = 148.5; 95% CI [250.213, 254.343]; 'above median of 128' indicates extended depth in the foreground. P_LV correlates positively with P_LN (r = 0.656, p < 0.01): foregrounds that start near the observer also extend deep in. In random-forest models, P_LV contributes ~24.3% feature importance for obstructive scenery, reflecting that obstructive scenery 'utilizes systematic positioning with texture contrasts' anchored at high P_LV.",
     "linked_iom_ids": [
       "I_SVCs_Lan2025_FG_DEPTH_LV_L15"
     ]
@@ -22497,7 +22497,7 @@
         "test_type_id": "TST_PEA",
         "test_description": "Definition record only"
       },
-      "description": "Foreground Vertical Depth Length (P_LN) defined/used by paper; no inferential association recorded in this minimal record."
+      "description": "P_LN (P_LN) defined/used by paper; no inferential association recorded in this minimal record."
     },
     "study_design": {
       "design_type_id": "DES_CRS",
@@ -22511,7 +22511,7 @@
       "confidence_grade_id": "CON_MED"
     },
     "is_descriptive_statistic": false,
-    "descriptive_content": "Foreground Vertical Depth Length (P_LN = count of unique non-repeating depth values in the foreground) is an absolute-value position metric capturing the vertical depth extent. In framed scenery, mean P_LN = 50; Mdn = 255; 95% CI [119.441, 152.929], near the maximum 256, indicating optimal alignment with observer position. P_LN correlates with T_ESI (r = 0.594, p < 0.01) reinforcing hierarchical contrast in space, and with P_LV (r = 0.656, p < 0.01). The metric is interpreted as encoding the way the foreground 'starts close and extends to sufficient depth'.",
+    "descriptive_content": "P_LN (P_LN = count of unique non-repeating depth values in the foreground) is an absolute-value position metric capturing the vertical depth extent. In framed scenery, mean P_LN = 50; Mdn = 255; 95% CI [119.441, 152.929], near the maximum 256, indicating optimal alignment with observer position. P_LN correlates with T_ESI (r = 0.594, p < 0.01) reinforcing hierarchical contrast in space, and with P_LV (r = 0.656, p < 0.01). The metric is interpreted as encoding the way the foreground 'starts close and extends to sufficient depth'.",
     "linked_iom_ids": [
       "I_SVCs_Lan2025_FG_DEPTH_LN_L15"
     ]
@@ -22589,7 +22589,7 @@
         "test_type_id": "TST_PEA",
         "test_description": "Definition record only"
       },
-      "description": "Foreground Depth Continuity Index (P_ECI) defined/used by paper; no inferential association recorded in this minimal record."
+      "description": "P_ECI (P_ECI) defined/used by paper; no inferential association recorded in this minimal record."
     },
     "study_design": {
       "design_type_id": "DES_CRS",
@@ -22603,7 +22603,7 @@
       "confidence_grade_id": "CON_MED"
     },
     "is_descriptive_statistic": false,
-    "descriptive_content": "Foreground Depth Continuity Index (P_ECI) is a distributional-trend metric defined as the coefficient of variation of the per-row/column coefficients of variation of |idx_i - idx_{i+1}| absolute depth differences across the foreground. P_ECI = 0 means continuously consistent depth; larger P_ECI means more abrupt depth transitions. In framed scenery, mean P_ECI = 1.237; Mdn = 1.143; 95% CI [1.074, 1.400] (lower-range concentration => smooth depth transitions). P_ECI correlates positively with low S_ERI (r = 0.656, p < 0.01) and negatively with S_ADI (r = -0.66, p < 0.01), supporting framed scenery's signature of regular outline plus smooth depth.",
+    "descriptive_content": "P_ECI (P_ECI) is a distributional-trend metric defined as the coefficient of variation of the per-row/column coefficients of variation of |idx_i - idx_{i+1}| absolute depth differences across the foreground. P_ECI = 0 means continuously consistent depth; larger P_ECI means more abrupt depth transitions. In framed scenery, mean P_ECI = 1.237; Mdn = 1.143; 95% CI [1.074, 1.400] (lower-range concentration => smooth depth transitions). P_ECI correlates positively with low S_ERI (r = 0.656, p < 0.01) and negatively with S_ADI (r = -0.66, p < 0.01), supporting framed scenery's signature of regular outline plus smooth depth.",
     "linked_iom_ids": [
       "I_SVCs_Lan2025_FG_DEPTH_ECI_L15"
     ]
