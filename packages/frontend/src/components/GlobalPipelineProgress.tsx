@@ -64,7 +64,10 @@ function GlobalPipelineProgress() {
 
   if (!pipelineRun.isRunning || onAnalysisPage) return null;
 
-  const lastStep = pipelineRun.steps[pipelineRun.steps.length - 1];
+  // v4.x — `.at(-1)` returns undefined on empty arrays (vs `[length - 1]`
+  // which evaluates to `[-1]` and also returns undefined but reads as a
+  // negative-index access). Same runtime behaviour, clearer intent.
+  const lastStep = pipelineRun.steps.at(-1);
   const stageLabel = lastStep ? `${lastStep.step} (${lastStep.status})` : 'starting…';
 
   return (

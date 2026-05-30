@@ -38,15 +38,21 @@ _TRANS_RANK = {"high": 0, "moderate": 1, "low": 2, "unknown": 3}
 
 MAX_EVIDENCE_PER_INDICATOR = 5
 
-# Indicators that are no longer supported by the current image-data pipeline.
-# Even if leftover evidence references them (e.g. cached KB rows), they MUST NOT
-# appear in recommendations because the calculator would fail. Filtered out at
-# the indicator-grouping stage so the LLM never sees them.
-#   - IND_GVI_ANG: requires fisheye / orthographic-projected sky maps which
-#     SceneRx's street-level pipeline does not produce.
-UNSUPPORTED_INDICATORS: set[str] = {
-    "IND_GVI_ANG",
-}
+# Recommendation eligibility is DATA-DRIVEN — there is intentionally no
+# hardcoded id list here. The single source of truth is the codebook
+# (Encoding_Dictionary.json -> A_indicators) `status` field, surfaced via
+# KnowledgeBase.is_recommendable(). An indicator is offered by the recommender
+# only when it exists in the codebook with status 'active' (a missing status
+# defaults to 'active' for backward compatibility). Excluded cases:
+#   - status 'future_development' (e.g. IND_SVF / IND_TVF and the panorama /
+#     simulation / fisheye-defined metrics that a per-view street crop cannot
+#     compute faithfully) — kept as future-development indicators;
+#   - status 'unsupported';
+#   - ids absent from the codebook entirely (e.g. legacy/phantom ids like
+#     IND_GVI_ANG that linger in evidence but have no canonical definition).
+# Users may still select excluded indicators manually; this only governs the
+# evidence-driven recommendation candidate pool.
+# See docs/per_view_indicator_change_proposal.md.
 
 
 # ---------------------------------------------------------------------------
@@ -460,15 +466,15 @@ class RecommendationService:
             indicator_groups: dict[str, list[dict]] = defaultdict(list)
             for e in matched:
                 ind_id = e["indicator"]["indicator_id"]
-                if ind_id in UNSUPPORTED_INDICATORS:
-                    continue  # never recommend these — calculator would fail
+                if not knowledge_base.is_recommendable(ind_id):
+                    continue  # not 'active' in the codebook (future/unsupported/absent)
                 indicator_groups[ind_id].append(e)
 
             logger.info(
-                "Retrieved %d evidence → %d indicators (skipped %d unsupported)",
+                "Retrieved %d evidence → %d indicators (skipped %d excluded)",
                 len(matched), len(indicator_groups),
                 sum(1 for e in matched
-                    if e["indicator"]["indicator_id"] in UNSUPPORTED_INDICATORS),
+                    if not knowledge_base.is_recommendable(e["indicator"]["indicator_id"])),
             )
 
             # ── 4. Build assessment cards (Python, instant) ──
@@ -555,7 +561,10 @@ class RecommendationService:
 
             indicator_groups: dict[str, list[dict]] = defaultdict(list)
             for e in matched:
-                indicator_groups[e["indicator"]["indicator_id"]].append(e)
+                ind_id = e["indicator"]["indicator_id"]
+                if not knowledge_base.is_recommendable(ind_id):
+                    continue  # not 'active' in the codebook (future/unsupported/absent)
+                indicator_groups[ind_id].append(e)
 
             assessment_cards = self._build_assessment_cards(indicator_groups)
 

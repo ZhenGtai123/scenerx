@@ -49,18 +49,38 @@ def calculate_indicator(image_path: str) -> Dict:
         total_pixels = h * w
         flat_pixels = pixels.reshape(-1, 3)
 
-        # Step 2: tree / shrub / herb
-        target_layers = ['tree', 'shrub', 'herb']
-        layer_counts = {}
+        # Step 2: Sum pixels per vertical vegetation stratum.
+        #
+        # VSD wants a 3-layer Shannon entropy (canopy / mid / ground), but
+        # the underlying semantic segmentation is ADE20K-150 which does NOT
+        # have "shrub" or "herb" classes — only "tree", "grass", "plant;
+        # flora;plant;life", "palm;palm;tree", and "flower". The original
+        # code asked for `['tree','shrub','herb']` directly against
+        # semantic_colors, so on real ADE20K outputs only `tree` matched.
+        # Result: total_veg ended up dominated by a single layer, every
+        # p_i = 1.0, ln(1) = 0, VSD = 0 for every image, every zone — which
+        # surfaced in the UI as "IND_VSD returned 0 for every zone".
+        #
+        # Fix: map the 3 vertical strata onto the actual ADE20K class names
+        # they correspond to, then sum class pixel counts within each
+        # stratum bucket before computing entropy.
+        LAYER_TO_ADE20K_CLASSES = {
+            'tree':  ['tree', 'palm;palm;tree'],          # canopy stratum
+            'shrub': ['plant;flora;plant;life'],          # mid stratum
+            'herb':  ['grass', 'flower'],                  # ground stratum
+        }
 
-        for layer in target_layers:
-            if layer not in semantic_colors:
-                continue
-            rgb = semantic_colors[layer]
-            mask = np.all(flat_pixels == rgb, axis=1)
-            count = int(np.sum(mask))
-            if count > 0:
-                layer_counts[layer] = count
+        layer_counts: dict = {}
+        for layer, class_names in LAYER_TO_ADE20K_CLASSES.items():
+            stratum_total = 0
+            for class_name in class_names:
+                rgb = semantic_colors.get(class_name)
+                if rgb is None:
+                    continue
+                mask = np.all(flat_pixels == rgb, axis=1)
+                stratum_total += int(np.sum(mask))
+            if stratum_total > 0:
+                layer_counts[layer] = stratum_total
 
         total_veg = sum(layer_counts.values())
         unmatched_pixels = total_pixels - total_veg

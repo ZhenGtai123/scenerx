@@ -41,47 +41,81 @@ print(f"\nCalculator loaded: {INDICATOR['id']} - {INDICATOR['name']}")
 
 
 def calculate_indicator(image_path: str) -> Dict:
-    """Calculate IND_PLD_RIC for a semantic segmentation mask image.
+    """Plant Diversity index — restrict to vegetation classes only.
 
-    Args:
-        image_path: Path to semantic segmentation PNG/JPG
-    Returns:
-        dict with 'success', 'value', and metric-specific fields.
+    v8.0 fix: the original implementation called np.unique on every pixel
+    in the semantic map, which counted SKY / ROAD / BUILDING etc. toward
+    "plant diversity". We now mask the semantic map to vegetation
+    classes (tree / grass / plant / palm / flower) before computing
+    richness / Shannon / Simpson, so the values actually reflect how
+    diverse the *plant* community is.
     """
     try:
-        img = Image.open(image_path).convert('RGB')
-        pixels = np.array(img).reshape(-1, 3)
-        total = len(pixels)
+        img = Image.open(image_path).convert("RGB")
+        sem = np.array(img)
+        H, W, _ = sem.shape
+        total = H * W
         if total == 0:
-            return {'success': False, 'error': 'Empty image', 'value': None}
+            return {"success": False, "error": "Empty image", "value": None}
 
-        # Get unique (r,g,b) classes and their counts
-        unique_rgb, counts = np.unique(pixels, axis=0, return_counts=True)
-        proportions = counts / total
+        # Build a vegetation-only mask from semantic_colors.
+        plant_keywords = (
+            "tree", "trees", "grass", "lawn", "plant", "plants",
+            "flora", "leaf", "leaves", "foliage", "flower", "bush",
+            "shrub", "palm", "garden",
+        )
+        sc = globals().get("semantic_colors") or {}
+        plant_palette = []
+        for cname, rgb in sc.items():
+            cn_low = cname.lower().replace("-", " ").replace("_", " ")
+            if any(kw in cn_low for kw in plant_keywords):
+                plant_palette.append((tuple(rgb), cname))
+        if not plant_palette:
+            return {"success": True, "value": 0.0,
+                    "class_count": 0, "total_pixels": int(total),
+                    "note": "no vegetation classes found in palette"}
 
-        # Compute the appropriate diversity index based on indicator ID
-        ind_id = INDICATOR['id']
-        if ind_id.endswith('_RIC'):
-            value = len(unique_rgb)
-            metric = 'richness (class count)'
-        elif ind_id.endswith('_SHA'):
+        # Count pixels per plant class.
+        counts = {}
+        for rgb, cname in plant_palette:
+            mask = np.all(sem == np.array(rgb, dtype=np.uint8), axis=-1)
+            n = int(np.sum(mask))
+            if n > 0:
+                counts[cname] = n
+        if not counts:
+            return {"success": True, "value": 0.0,
+                    "class_count": 0, "total_pixels": int(total),
+                    "note": "no vegetation pixels in this image"}
+
+        total_plant = sum(counts.values())
+        proportions = np.array(list(counts.values()), dtype=float) / total_plant
+
+        ind_id = INDICATOR["id"]
+        if ind_id.endswith("_RIC"):
+            value = len(counts)
+            metric = "richness (plant class count)"
+        elif ind_id.endswith("_SHA"):
             p = proportions[proportions > 0]
             value = float(-np.sum(p * np.log(p)))
-            metric = 'Shannon H'
-        elif ind_id.endswith('_SIM'):
+            metric = "Shannon H (plant)"
+        elif ind_id.endswith("_SIM"):
             value = float(1 - np.sum(proportions ** 2))
-            metric = 'Simpson 1-D'
+            metric = "Simpson 1-D (plant)"
         else:
-            return {'success': False, 'error': f'Unknown variant: {ind_id}', 'value': None}
+            return {"success": False,
+                    "error": f"Unknown variant: {ind_id}", "value": None}
 
         return {
-            'success': True,
-            'value': round(value, 4),
-            'metric': metric,
-            'class_count': int(len(unique_rgb)),
-            'total_pixels': int(total),
+            "success": True,
+            "value": round(float(value), 4),
+            "metric": metric,
+            "class_count": int(len(counts)),
+            "total_plant_pixels": int(total_plant),
+            "total_pixels": int(total),
+            "plant_breakdown": counts,
         }
     except FileNotFoundError:
-        return {'success': False, 'error': f'Image not found: {image_path}', 'value': None}
+        return {"success": False,
+                "error": f"Image not found: {image_path}", "value": None}
     except Exception as e:
-        return {'success': False, 'error': str(e), 'value': None}
+        return {"success": False, "error": str(e), "value": None}

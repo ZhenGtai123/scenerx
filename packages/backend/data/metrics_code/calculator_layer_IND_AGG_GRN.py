@@ -41,6 +41,19 @@ print(f" Formula: {INDICATOR['formula']}")
 # CALCULATION FUNCTION
 # =============================================================================
 def calculate_indicator(P_gi: List[float]) -> Dict:
+    # v8.0 — graceful skip when called per-image. This is a composite/
+    # aggregator indicator that needs other-indicators or multi-location
+    # input, not a single image. The orchestrator iterates per-image with
+    # image_path strings; without this guard we'd raise AttributeError on
+    # the first .get() call. Downstream composite callers that pass the
+    # correct dict input still execute the formula below.
+    if isinstance(P_gi, str):
+        return {
+            "success": False,
+            "value": None,
+            "error": "IND_AGG_GRN: composite indicator — call after per-image metrics are computed; cannot evaluate from a single image_path",
+            "skip_reason": "composite_or_aggregator",
+        }
     try:
         values = np.array(P_gi, dtype=float)
         n = len(values)

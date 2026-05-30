@@ -1,5 +1,5 @@
 import { useMemo, useCallback, useState, useEffect, useRef } from 'react';
-import { useParams, Link, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import {
   Box,
@@ -47,11 +47,13 @@ import useAppStore from '../store/useAppStore';
 import { generateReport } from '../utils/generateReport';
 import { exportAnalysisExcel } from '../utils/exportExcel';
 import { exportBundle } from '../utils/exportBundle';
-import { useRunDesignStrategies, useRunClusteringByProject, useRunClusteringWithinZones } from '../hooks/useApi';
+import { useRunDesignStrategies, useRunClusteringByProject, useRunClusteringWithinZones, queryKeys } from '../hooks/useApi';
 import { useGroupingUnits } from '../hooks/useGroupingUnits';
 import useAppToast from '../hooks/useAppToast';
+import { useTaskProgress } from '../components/TaskProgressToast';
 import PageShell from '../components/PageShell';
 import PageHeader from '../components/PageHeader';
+import { ErrorBoundary } from '../components/ErrorBoundary';
 import EmptyState from '../components/EmptyState';
 import {
   CHART_REGISTRY,
@@ -127,6 +129,47 @@ function viewIdToRequestFields(viewId: string): { grouping_mode: GroupingMode; v
     grouping_mode: isClusterDerived ? 'clusters' : 'zones',
     view_id: viewId,
   };
+}
+
+// ---------------------------------------------------------------------------
+// v4.x — Baseline naming helper.
+//
+// The same grouping unit (e.g. "Road 1 sub-cluster #1") has different |z|
+// values across views because mean/std are computed against different
+// reference pools per view. This helper turns a viewId into a user-facing
+// baseline name so the AI Report / Strategies / Bundle can each surface
+// "what pool was this calibrated against" up-front, preventing the
+// "cross-view |z| comparison" mistake.
+//
+// Examples:
+//   friendlyViewLabel('zones', zones)               → 'Zones'
+//   friendlyViewLabel('clusters', zones)            → 'Clusters'
+//   friendlyViewLabel('parent_zones', zones)        → 'Parent zones'
+//   friendlyViewLabel('all_sub_clusters', zones)    → 'All sub-clusters'
+//   friendlyViewLabel('within_zone:zone_3', zones)  → 'West Lake Inner Ring Road 1 (sub-clusters)'
+// ---------------------------------------------------------------------------
+function friendlyViewLabel(
+  viewId: string,
+  spatialZones?: Array<{ zone_id: string; zone_name?: string | null }>,
+): string {
+  if (viewId === 'zones') return 'Zones';
+  if (viewId === 'clusters') return 'Clusters';
+  if (viewId === 'parent_zones') return 'Parent zones';
+  if (viewId === 'all_sub_clusters') return 'All sub-clusters';
+  if (viewId.startsWith('within_zone:')) {
+    const zid = viewId.slice('within_zone:'.length);
+    const matched = spatialZones?.find((z) => z.zone_id === zid);
+    if (!matched) {
+      // v4.x — Defence in depth: Fix A (useAppStore hydrate) is the primary
+      // guard, but a within_zone:<deleted_id> can still slip through if the
+      // hydrate hasn't fired yet (e.g. mid-mutation render). Surface a clear
+      // signal rather than the raw timestamp-ish zone id.
+      return 'Deleted zone (sub-clusters)';
+    }
+    const zname = matched.zone_name || zid;
+    return `${zname} (sub-clusters)`;
+  }
+  return viewId;
 }
 
 // ---------------------------------------------------------------------------
@@ -220,7 +263,7 @@ function PipelineRunningCard({
 /** Rendered in place of the chart grid when a project has ≥ 2 user zones
  *  but the user hasn't yet picked a multi-zone strategy. Two options:
  *    A — keep zone-level analysis as-is (no clustering)
- *    B — within each zone run HDBSCAN to surface intra-zone heterogeneity
+ *    B — within each zone run GMM to surface intra-zone heterogeneity
  *
  *  Picking either option fires Design Strategies generation immediately so
  *  the user lands on the Strategies tab with results ready. */
@@ -251,8 +294,8 @@ function MultiZoneEntryGate({
               </Heading>
               <Text fontSize="sm" color="gray.600">
                 {zoneCount} zones, {imageCount} image record{imageCount === 1 ? '' : 's'}.
-                You can either compare the zones as-is, or run HDBSCAN within
-                each zone to surface intra-zone heterogeneity (sub-archetypes).
+                You can either compare the zones as-is, or run within-zone
+                clustering (GMM) to surface intra-zone heterogeneity (sub-archetypes).
               </Text>
               <Text fontSize="sm" color="gray.600" mt={2}>
                 Pick one of the two paths below — design strategies will
@@ -289,7 +332,7 @@ function MultiZoneEntryGate({
                 <VStack align="stretch" spacing={3}>
                   <Heading size="xs">Option B — Within-zone clustering</Heading>
                   <Text fontSize="xs" color="gray.600">
-                    For each user zone separately run HDBSCAN on its images
+                    For each user zone separately run GMM clustering on its images
                     to find sub-archetypes (e.g. zone1_A / zone1_B,
                     zone2_A / zone2_B / zone2_C). All charts then compare
                     the resulting sub-zones. Best when zones are large or
@@ -303,7 +346,7 @@ function MultiZoneEntryGate({
                     isDisabled={!canRunClustering}
                     loadingText="Clustering each zone…"
                   >
-                    Cluster within zones (HDBSCAN)
+                    Cluster within zones (GMM)
                   </Button>
                 </VStack>
               </CardBody>
@@ -416,7 +459,7 @@ function SingleZoneEntryGate({
                 <VStack align="stretch" spacing={3}>
                   <Heading size="xs">Option C — Dual View</Heading>
                   <Text fontSize="xs" color="gray.600">
-                    Run HDBSCAN density-based clustering on per-image
+                    Run GMM clustering on per-image
                     indicator values, then display the single-zone view and
                     the cluster view side by side via the segmented control.
                   </Text>
@@ -581,8 +624,18 @@ function renderMarkdown(md: string) {
       }
       const dataRows = tableRows.filter(r => !r.match(/^\|[\s-:|]+\|$/));
       if (dataRows.length > 0) {
-        const headers = dataRows[0].split('|').filter(c => c.trim()).map(c => c.trim());
-        const body = dataRows.slice(1).map(r => r.split('|').filter(c => c.trim()).map(c => c.trim()));
+        // Split a markdown table row into cells, dropping ONLY the empty
+        // tokens produced by the leading/trailing pipes (|a|b| -> ['','a','b','']).
+        // A plain .filter(trim) would also drop legitimately-empty interior
+        // cells and shift every following column under the wrong header.
+        const splitCells = (r: string) => {
+          const parts = r.split('|');
+          if (parts.length && parts[0].trim() === '') parts.shift();
+          if (parts.length && parts[parts.length - 1].trim() === '') parts.pop();
+          return parts.map(c => c.trim());
+        };
+        const headers = splitCells(dataRows[0]);
+        const body = dataRows.slice(1).map(splitCells);
         elements.push(
           <Box key={i} overflowX="auto" my={2} maxW="100%">
             <Table size="sm" variant="simple" w="auto">
@@ -709,6 +762,13 @@ function Reports() {
   const { projectId: routeProjectId } = useParams<{ projectId: string }>();
   const navigate = useNavigate();
   const toast = useAppToast();
+  // Elapsed-time progress cards for the long-running operations that have no
+  // granular sub-progress channel (bundle export, clustering, Excel export).
+  // One handle each so concurrent runs get independent cards. See
+  // components/TaskProgressToast.
+  const bundleProgress = useTaskProgress();
+  const clusterProgress = useTaskProgress();
+  const excelProgress = useTaskProgress();
   const queryClient = useQueryClient();
 
   const {
@@ -761,6 +821,103 @@ function Reports() {
   const designStrategiesMutation = useRunDesignStrategies();
   const [clusteringResult, setClusteringResult] = useState<ClusteringResponse | null>(null);
 
+  // v4.x — Sync clusteringResult from the project payload's persisted
+  // sub-keys whenever the project (or the active panorama view) changes.
+  //
+  // Why this is needed: clusteringResult is React-local state in Reports.tsx
+  // that originally only got written by handleRunClustering /
+  // handleRunWithinZoneClustering (line ~991/1014/1248). On a panorama view
+  // switch (handleSwitchPanoramaView), the project payload's
+  // zone_analysis_result is mirrored to the NEW view's bucket, so the
+  // cluster_view / clustering sub-keys swap automatically — but
+  // clusteringResult stays stuck at whatever the last handleRun* set, which
+  // means the "Cluster characteristics" chips (driven by
+  // clusteringResult.clustering.archetype_profiles, e.g. "Cluster 0: Low-
+  // Building / High-Tree / Low-Diversity") show the previous view's labels
+  // even after the cards above them (driven by zoneAnalysisResult via
+  // groupingUnits) correctly swap to the new view's k/silhouette/|z|.
+  //
+  // We reconstruct a minimal ClusteringResponse from the persisted
+  // sub-keys so all the legacy code paths reading clusteringResult.* get
+  // per-view-correct data. The other ClusteringResponse fields (skipped,
+  // reason, n_points_*) don't have persisted equivalents — they're
+  // session-only diagnostics from the last live cluster call, and the
+  // consumers we care about (archetype chips, k/silhouette badge) only
+  // read .clustering, .zone_analysis, and .analysis_views.
+  useEffect(() => {
+    const projZar = currentProject?.zone_analysis_result as Record<string, unknown> | null | undefined;
+    if (!projZar) {
+      setClusteringResult(null);
+      return;
+    }
+    const persistedClustering = projZar.clustering as ClusteringResponse['clustering'] | undefined;
+    const persistedClusterView = projZar.cluster_view as ClusteringResponse['zone_analysis'] | undefined;
+    const persistedAnalysisViews = projZar.analysis_views as ClusteringResponse['analysis_views'] | undefined;
+    if (!persistedClustering && !persistedClusterView) {
+      // This view hasn't been clustered (or pipeline only — no cluster sub-keys).
+      // Leave whatever clusteringResult holds rather than nuking it; the cluster
+      // panel renders nothing relevant without a cluster run anyway.
+      return;
+    }
+    setClusteringResult({
+      clustering: persistedClustering ?? null,
+      segment_diagnostics: [],
+      zone_analysis: persistedClusterView ?? null,
+      analysis_views: persistedAnalysisViews ?? {},
+      skipped: false,
+      reason: '',
+      n_points_used: persistedClustering?.point_ids_ordered?.length ?? 0,
+      n_points_with_gps: persistedClustering?.point_lats?.length ?? 0,
+    } as ClusteringResponse);
+  }, [currentProject?.id, currentProject?.active_panorama_view, currentProject?.zone_analysis_result]);
+
+  // v4.x — Defensive sync for AI report + design strategies from project
+  // payload, paired with the activeViewId so they always reflect the
+  // currently-displayed (panorama_view, viewId) combination.
+  //
+  // Why this is needed: hydrateFromProject runs once per refetch and binds
+  // aiReport/designStrategyResult to `preservedGroupingMode` (which only
+  // resolves to 'zones' or 'clusters', losing finer viewIds like
+  // 'parent_zones' / 'within_zone:<id>'). For panorama projects, the user
+  // is also free to flip the inner zones/clusters toggle without going
+  // through hydration, which means the displayed aiReport / strategies
+  // can fall out of sync with what's actually persisted for that combo in
+  // project.ai_reports[viewId] / project.design_strategy_results[viewId].
+  //
+  // This effect re-derives the active slots whenever EITHER the project
+  // payload OR the active viewId changes, reading straight from the
+  // payload's per-view dicts. It's the same pattern as the clusteringResult
+  // sync above — a single source-of-truth derived view, instead of
+  // accumulated in-memory state that can drift.
+  useEffect(() => {
+    if (!currentProject) return;
+    const aiReportsDict = (currentProject.ai_reports ?? {}) as Record<string, string | null>;
+    const aiReportMetasDict = (currentProject.ai_report_metas ?? {}) as Record<string, Record<string, unknown> | null>;
+    const dsDict = (currentProject.design_strategy_results ?? {}) as Record<string, DesignStrategyResult | null>;
+
+    const targetReport = aiReportsDict[activeViewId] ?? null;
+    const targetMeta = aiReportMetasDict[activeViewId] ?? null;
+    const targetStrategies = dsDict[activeViewId] ?? null;
+
+    const store = useAppStore.getState();
+    // Only write when the derived value actually differs, to avoid an
+    // infinite re-render loop (store updates → currentProject re-references
+    // via hydrateFromProject → effect fires again).
+    if (store.aiReport !== targetReport) store.setAiReport(targetReport);
+    if (store.aiReportMeta !== targetMeta) store.setAiReportMeta(targetMeta);
+    if (store.designStrategyResult !== targetStrategies) {
+      store.setDesignStrategyResultForViewId(activeViewId, targetStrategies);
+    }
+  }, [
+    currentProject,
+    currentProject?.id,
+    currentProject?.active_panorama_view,
+    currentProject?.ai_reports,
+    currentProject?.ai_report_metas,
+    currentProject?.design_strategy_results,
+    activeViewId,
+  ]);
+
   // Chart export plumbing (6.B(1)). chartRefs is populated by ref callbacks
   // on every ChartHost; exporting flips forceMount so lazy-loaded cards and
   // the clustering accordion render before captureChartsForReport runs.
@@ -785,6 +942,12 @@ function Reports() {
   // (when actually clustering is still finishing in the background). This
   // flag is true ONLY while handleGenerateAiReport is in flight.
   const [isGeneratingAiReport, setIsGeneratingAiReport] = useState(false);
+  // Held true for the ENTIRE multi-panorama-view clustering loop (which runs
+  // one clustering mutation per view sequentially). Without it, the button's
+  // spinner is tied to each per-view mutation's isPending and blinks
+  // off→on between views; this keeps a single continuous spinner until every
+  // view is done.
+  const [isMultiViewClustering, setIsMultiViewClustering] = useState(false);
   // v4 / Module 13 — granular SSE-driven progress state. The progress bar
   // reads off this single union so the parent doesn't have to track stage,
   // unitIndex, unitTotal, etc. as separate `useState` slots. AbortController
@@ -860,7 +1023,7 @@ function Reports() {
     // clear toast on the remaining failure modes.
     const projectIdForCluster = currentProject?.id ?? routeProjectId ?? null;
     // Defensive guard — multi-zone projects must use within-zone clustering,
-    // not pooled global HDBSCAN. The UI hides every entry-point that calls
+    // not pooled global GMM. The UI hides every entry-point that calls
     // this handler when userZoneCount ≥ 2 (binary toggle, cluster panel
     // re-run button, ModeAlert in image_level mode), but a stale URL
     // navigation, prefetch, or test path could still get here. Bail out
@@ -904,7 +1067,114 @@ function Reports() {
         });
         return;
       }
-      toast({ title: 'Running clustering on per-image indicators…', status: 'info', duration: 4000 });
+
+      // v4.x — Panorama branch: if the project has active_panorama_views
+      // set, the user picked Option C as a project-wide decision. We cluster
+      // ALL active views sequentially, each with its own per-view metrics
+      // (restored on the backend via the active_panorama_view switch + the
+      // _ensure_per_view_metrics guard in the clustering endpoint). Final
+      // state: every view's bucket has its own cluster_view persisted, the
+      // user lands back on the view they started on, and the entry-gate
+      // decision (`singleZoneStrategy='cluster'`) sticks across switches.
+      // Without this, only the active view would get clustered and the
+      // other views would still show the "Re-run clustering" hint.
+      const panoramaViewsForCluster = currentProject?.active_panorama_views ?? [];
+      if (panoramaViewsForCluster.length > 0) {
+        clusterProgress.begin(
+          'Running clustering for all panorama views…',
+          `0 / ${panoramaViewsForCluster.length} views`,
+        );
+        const originalView = currentProject?.active_panorama_view ?? panoramaViewsForCluster[0];
+        // Single continuous spinner across the whole per-view loop (see flag decl).
+        setIsMultiViewClustering(true);
+        try {
+        let i = 0;
+        let lastResult: Awaited<ReturnType<typeof clusteringMutation.mutateAsync>> | null = null;
+        for (const view of panoramaViewsForCluster) {
+          i++;
+          clusterProgress.setStep(
+            i,
+            panoramaViewsForCluster.length,
+            `Clustering ${view} view…`,
+            'GMM-BIC + KNN smoothing on per-view metrics',
+          );
+          // Switch active view → backend update_project mirrors the previous
+          // top-level (with whatever cluster_view it had) into the OLD view's
+          // bucket, then hydrates NEW view's bucket to top-level + restores
+          // img.metrics_results from bucket[view]["image_metrics"]. The
+          // _ensure_per_view_metrics guard inside the clustering endpoint
+          // re-restores defensively, so even if this switch was a no-op the
+          // cluster call still uses the right view's data.
+          await api.projects.update(projectIdForCluster, { active_panorama_view: view });
+          const r = await clusteringMutation.mutateAsync({
+            project_id: projectIdForCluster,
+            indicator_ids: indicatorIds,
+            layer: 'full',
+          });
+          lastResult = r;
+          if (r.skipped) {
+            clusterProgress.dismiss();
+            toast({
+              title: `Clustering skipped for ${view}: ${r.reason}`,
+              status: 'info',
+              duration: 6000,
+            });
+            // Bail out — partial results are still persisted per-view on the
+            // backend; the user can investigate the skipped view's data
+            // separately.
+            return;
+          }
+        }
+        // Switch BACK to the user's starting view so the Reports page lands
+        // where they expected. The final switch also snapshots the last
+        // iteration's top-level (last view's cluster_view) into its bucket,
+        // closing the persistence loop for view N.
+        await api.projects.update(projectIdForCluster, { active_panorama_view: originalView });
+
+        // Entry-gate decision + grouping mode: pick Option C, land on Cluster
+        // view. These are session-level UI state, not project state.
+        setSingleZoneStrategy('cluster');
+        setGroupingMode('clusters');
+        const store = useAppStore.getState();
+        store.setActiveViewId('clusters');
+        // Clear in-memory snapshots so hydrateFromProject's same-project
+        // refetch derives clusterAnalysisResult from the freshly-mirrored
+        // project payload's zone_analysis_result.cluster_view (per the
+        // hydration logic added in useAppStore.ts).
+        store.setClusterAnalysisResult(null);
+        store.setUserZoneAnalysisResult(null);
+        store.setAnalysisViewsByViewId({});
+        store.setZoneAnalysisResult(null);
+
+        // NOTE: we deliberately do NOT call setClusteringResult(lastResult)
+        // here even though we have it in scope. The new
+        // sync-from-project-payload useEffect (added just above the cluster
+        // mutation hooks) will derive clusteringResult from
+        // project.zone_analysis_result.{clustering,cluster_view,analysis_views}
+        // for the user's originalView after the invalidate+refetch lands —
+        // setting it to lastResult here would briefly paint the LAST iteration's
+        // view (which may not be originalView) and immediately get overwritten
+        // by the useEffect, causing a flash of wrong data.
+        queryClient.invalidateQueries({ queryKey: queryKeys.project(projectIdForCluster) });
+        queryClient.invalidateQueries({ queryKey: ['chart-summary'] });
+
+        const kSummary = lastResult?.clustering
+          ? ` · last view k=${lastResult.clustering.k}, silhouette ${lastResult.clustering.silhouette_score.toFixed(2)}`
+          : '';
+        clusterProgress.succeed(
+          `${panoramaViewsForCluster.length} panorama views clustered`,
+          `Each view has its own independent cluster bucket${kSummary}`,
+        );
+        return;
+        } finally {
+          setIsMultiViewClustering(false);
+        }
+      }
+
+      clusterProgress.begin(
+        'Running clustering…',
+        'Grouping images by visual-indicator profile — this runs on the server',
+      );
       const result = await clusteringMutation.mutateAsync({
         project_id: projectIdForCluster,
         indicator_ids: indicatorIds,
@@ -912,6 +1182,7 @@ function Reports() {
       });
       setClusteringResult(result);
       if (result.skipped) {
+        clusterProgress.dismiss();
         toast({ title: `Clustering skipped: ${result.reason}`, status: 'info', duration: 6000 });
       } else if (result.clustering) {
         // #1 — Backend now returns a complete cluster-as-zone Stage 2.5
@@ -949,10 +1220,10 @@ function Reports() {
         setGroupingMode('clusters');
         setSingleZoneStrategy('cluster');
         const gpsNote = result.n_points_with_gps ? ` · ${result.n_points_with_gps}/${result.n_points_used} with GPS` : '';
-        toast({
-          title: `${result.clustering.k} archetypes promoted to zones (silhouette: ${result.clustering.silhouette_score.toFixed(2)})${gpsNote}`,
-          status: 'success',
-        });
+        clusterProgress.succeed(
+          `${result.clustering.k} archetypes promoted to zones`,
+          `silhouette ${result.clustering.silhouette_score.toFixed(2)}${gpsNote}`,
+        );
 
         // Wipe the 'clusters' slot specifically — strategies + AI report.
         // This both clears any stale prior-run cache AND mirrors null into
@@ -978,13 +1249,7 @@ function Reports() {
         ? (err as { response?: { data?: { detail?: string } } }).response?.data?.detail
         : null;
       const fallback = err instanceof Error ? err.message : 'Unknown error';
-      toast({
-        title: 'Clustering failed',
-        description: detail || fallback,
-        status: 'error',
-        duration: 10000,
-        isClosable: true,
-      });
+      clusterProgress.fail('Clustering failed', detail || fallback);
       console.error('[Clustering] backend error:', err);
     }
   }, [
@@ -992,6 +1257,7 @@ function Reports() {
     currentProject,
     clusteringMutation,
     toast,
+    clusterProgress,
     userZoneAnalysisResult,
     setUserZoneAnalysisResult,
     setClusterAnalysisResult,
@@ -1001,8 +1267,8 @@ function Reports() {
     routeProjectId,
   ]);
 
-  // v4 / Module 1 (multi-zone Option B) — within-zone HDBSCAN. For each user
-  // zone, run HDBSCAN on its images independently; the backend stitches the
+  // v4 / Module 1 (multi-zone Option B) — within-zone GMM. For each user
+  // zone, run GMM on its images independently; the backend stitches the
   // per-zone results into one composite ZoneAnalysisResult treating each
   // sub-cluster as a virtual zone. After the new analysis lands, kick off
   // strategies regen so the user lands on the Strategies tab with results.
@@ -1034,8 +1300,94 @@ function Reports() {
         });
         return;
       }
+
+      // v4.x — Panorama branch (mirrors handleRunClustering's panorama
+      // branch for the multi-zone path). When the project has
+      // active_panorama_views set, the user's pick of Option B
+      // (Within-zone clustering) is a project-wide decision; we cluster
+      // ALL active views sequentially so each view's bucket carries its
+      // own analysis_views + cluster_view payloads. After the loop, the
+      // user lands back on the view they started on with the
+      // within-zone strategy locked in. Without this, only the active
+      // view would have within-zone results and the other views would
+      // still show the entry gate or empty cluster hint.
+      const panoramaViewsForCluster = currentProject?.active_panorama_views ?? [];
+      if (panoramaViewsForCluster.length > 0) {
+        const originalView = currentProject?.active_panorama_view ?? panoramaViewsForCluster[0];
+        // Single continuous spinner across the whole per-view loop (see flag decl).
+        setIsMultiViewClustering(true);
+        try {
+        toast({
+          title: `Running within-zone clustering across ${panoramaViewsForCluster.length} panorama views…`,
+          description: 'Each view is clustered independently — this takes a few moments.',
+          status: 'info',
+          duration: 5000,
+        });
+        let lastResult: Awaited<ReturnType<typeof withinZoneClusteringMutation.mutateAsync>> | null = null;
+        for (const view of panoramaViewsForCluster) {
+          await api.projects.update(projectIdForCluster, { active_panorama_view: view });
+          const r = await withinZoneClusteringMutation.mutateAsync({
+            project_id: projectIdForCluster,
+            indicator_ids: indicatorIds,
+            layer: 'full',
+          });
+          if (r.skipped) {
+            toast({
+              title: `Within-zone clustering skipped for ${view}: ${r.reason}`,
+              status: 'info',
+              duration: 6000,
+            });
+            // Bail — partial completed views are already persisted on the
+            // backend. User can recover by re-running, or by clustering the
+            // skipped view individually.
+            return;
+          }
+          lastResult = r;
+        }
+        // Switch back to the user's starting view so they land where they
+        // expected. The final switch also snapshots the last iteration's
+        // top-level (including analysis_views + cluster_view) into its
+        // bucket, closing the persistence loop for the last view.
+        await api.projects.update(projectIdForCluster, { active_panorama_view: originalView });
+
+        // Entry-gate decision + landing view: lock in within-zone-cluster
+        // strategy for the project, land on parent_zones (zone-level
+        // overview). The hydration cycle below repopulates the in-memory
+        // cluster snapshots from the originalView's bucket.
+        setMultiZoneStrategy('within_zone_cluster');
+        const store = useAppStore.getState();
+        store.setClusterAnalysisResult(null);
+        store.setUserZoneAnalysisResult(null);
+        store.setAnalysisViewsByViewId({});
+        store.setZoneAnalysisResult(null);
+        // We don't know which viewId will land — depends on whether
+        // originalView's bucket contains parent_zones in its analysis_views
+        // sub-key. hydrateFromProject derives the active view id from
+        // preservedGroupingMode (or hydration logic). After invalidate, the
+        // hydration will populate analysisViewsByViewId from bucket data
+        // and the Reports rendering picks parent_zones if available.
+        setGroupingMode('clusters');
+        store.setActiveViewId('parent_zones');
+
+        queryClient.invalidateQueries({ queryKey: queryKeys.project(projectIdForCluster) });
+        queryClient.invalidateQueries({ queryKey: ['chart-summary'] });
+
+        const subZoneCount = lastResult?.zone_analysis?.zone_diagnostics?.length ?? 0;
+        const zCount = currentProject?.spatial_zones?.length ?? 0;
+        toast({
+          title: `${panoramaViewsForCluster.length} panorama views × within-zone clustering complete`,
+          description: `Last view: ${subZoneCount} sub-zones across ${zCount} zones. Switch panorama view to see each view's independent within-zone result.`,
+          status: 'success',
+          duration: 7000,
+        });
+        return;
+        } finally {
+          setIsMultiViewClustering(false);
+        }
+      }
+
       toast({
-        title: 'Running HDBSCAN within each zone…',
+        title: 'Running within-zone clustering…',
         status: 'info',
         duration: 4000,
       });
@@ -1212,7 +1564,18 @@ function Reports() {
       // eslint-disable-next-line @typescript-eslint/no-unused-vars
       const { image_records: _ir, ...zoneAnalysisCompact } = zoneAnalysisResult;
       const projectContext = currentProject ? {
-        project: { name: currentProject.project_name, location: currentProject.project_location },
+        project: {
+          name: currentProject.project_name,
+          location: currentProject.project_location,
+          // v6.x — surface the Stage 1 zone graph to Agent A so cross-zone
+          // interpretation can be conditioned on declared edges rather than
+          // treating every zone pair as independent.
+          spatial_zones: (currentProject.spatial_zones || []).map(z => ({
+            zone_id: z.zone_id,
+            zone_name: z.zone_name,
+          })),
+          spatial_relations: currentProject.spatial_relations || [],
+        },
         context: {
           climate: { koppen_zone_id: currentProject.koppen_zone_id },
           urban_form: { space_type_id: currentProject.space_type_id, lcz_type_id: currentProject.lcz_type_id },
@@ -1345,6 +1708,19 @@ function Reports() {
         grouping_mode: viewIdToRequestFields(activeViewId).grouping_mode,
         strategy_signature: strategySignature,
       });
+      // CRITICAL — refresh the project cache so currentProject.ai_reports /
+      // design_strategy_results immediately reflect what the streaming
+      // generate just PERSISTED on the backend. The stream sets only the
+      // in-memory store (setAiReport above), NOT the React Query cache, so
+      // without this the cache stays stale until the NEXT panorama switch's
+      // refetch. That's why "generate → immediately switch away → switch
+      // back" lost the report (the switch's snapshot/hydrate ran against a
+      // stale top-level), while switching several times eventually
+      // converged. Awaiting (with isGeneratingAiReport still true) also
+      // blocks a too-fast switch until the cache is authoritative.
+      if (routeProjectId) {
+        await queryClient.invalidateQueries({ queryKey: queryKeys.project(routeProjectId) });
+      }
       const wc = Number(result.metadata?.word_count ?? 0);
       const dataWarning = result.metadata?.data_quality_warning as string | undefined;
       // v4 / Module 13 — truncation toast. Fires at generation time so the
@@ -1438,13 +1814,13 @@ function Reports() {
         setAiReportProgress((prev) => (prev.kind === 'done' ? { kind: 'idle' } : prev));
       }, 1500);
     }
-  }, [zoneAnalysisResult, designStrategyResult, recommendations, currentProject, queryClient, groupingMode, clusterAnalysisResult, toast, setAiReport, setAiReportMeta, routeProjectId]);
+  }, [zoneAnalysisResult, designStrategyResult, recommendations, currentProject, queryClient, groupingMode, clusterAnalysisResult, toast, setAiReport, setAiReportMeta, routeProjectId, aiReport, activeViewId]);
 
   // Completion status
   const hasVision = (currentProject?.uploaded_images?.length ?? 0) > 0;
   const hasIndicators = recommendations.length > 0;
   const hasAnalysis = zoneAnalysisResult !== null;
-  const hasDesign = designStrategyResult !== null || pipelineResult?.design_strategies !== null && pipelineResult?.design_strategies !== undefined;
+  const hasDesign = designStrategyResult != null || pipelineResult?.design_strategies != null;
   const isEmpty = !hasIndicators && !hasAnalysis && !hasDesign;
 
   const steps = [
@@ -1571,6 +1947,17 @@ function Reports() {
   // we don't fire for image-level fallback analyses (those don't have
   // cross-grouping charts in scope to begin with — viableInModes already
   // filters them).
+  // v4.x - per-view N<3 degeneracy gate. Fires once per view; the per-view
+  // chartCtx already reflects the active view's ZoneAnalysisResult, so this
+  // single check covers all 5 view options uniformly:
+  //   - zones                          : sortedDiagnostics.length = N zones
+  //   - clusters                       : sortedDiagnostics.length = K global clusters
+  //   - parent_zones                   : sortedDiagnostics.length = N parent zones
+  //   - all_sub_clusters               : sortedDiagnostics.length = total sub-clusters across zones
+  //   - within_zone:<zone_id>          : sortedDiagnostics.length = K sub-clusters of that zone
+  // The 5 cross-grouping charts (B1/B2/B3/B4/D3) collapse mathematically when
+  // there are fewer than 3 grouping units (see DEGENERATE_AT_N2_CHART_IDS
+  // comment for the math), so we hide them and surface ModeAlert instead.
   const isDegenerateN2Grouping =
     chartCtx.analysisMode === 'zone_level'
     && chartCtx.sortedDiagnostics.length <= 2
@@ -1689,7 +2076,7 @@ function Reports() {
     singleZoneStrategy === null;
   // v4 / Module 1 (multi-zone): mirror gate for projects with ≥ 2 user zones.
   // Fires before any chart renders, asking the user whether to keep zone-level
-  // analysis as-is or run within-zone HDBSCAN sub-clustering. Resets each
+  // analysis as-is or run within-zone GMM sub-clustering. Resets each
   // session (multiZoneStrategy is in-memory only).
   const multiZoneGated =
     hasAnalysis &&
@@ -1732,11 +2119,30 @@ function Reports() {
   const hasWithinZoneClusterViews = !!(
     analysisViewsByViewId.parent_zones || analysisViewsByViewId.all_sub_clusters
   );
+  // On a panorama-view SWITCH, the live store dicts above (clusterAnalysisResult,
+  // analysisViewsByViewId) are CLEARED and only repopulated by a live cluster
+  // run — hydration does NOT refill them. But the switched-to view's own
+  // clustering IS restored into currentProject.zone_analysis_result (its
+  // {clustering, cluster_view, analysis_views} sub-keys, mirrored per-view by
+  // the backend). Read that persisted payload directly as proof the view was
+  // clustered; otherwise switching to an already-clustered view falsely shows
+  // "clustering hasn't been run yet" (the reported bug).
+  const _projZarCluster = currentProject?.zone_analysis_result as Record<string, unknown> | null | undefined;
+  const _projAnalysisViews = (_projZarCluster?.analysis_views ?? {}) as Record<string, unknown>;
+  const viewWasClusteredPersisted = !!(
+    _projZarCluster && (
+      _projZarCluster.clustering ||
+      _projZarCluster.cluster_view ||
+      _projAnalysisViews.parent_zones ||
+      _projAnalysisViews.all_sub_clusters
+    )
+  );
   const wantsClusterButMissing =
     !clusteringLocked &&
     groupingMode === 'clusters' &&
     !clusterAnalysisResult &&
-    !hasWithinZoneClusterViews;
+    !hasWithinZoneClusterViews &&
+    !viewWasClusteredPersisted;
 
   // #2 — atomic chart reveal. Charts are eagerly mounted (forceMount=true on
   // every host below) so they all start rendering at once; we keep them
@@ -1800,6 +2206,25 @@ function Reports() {
       return changed ? next : prev;
     });
   }, [visibleChartIds]);
+
+  // v4.x — Panorama view switch: HARD-RESET the mounted set so the
+  // "Rendering charts…" skeleton starts cycling at 0/N again. Without this,
+  // panorama view switches that keep the same chart roster (e.g. both views
+  // run in zone-level mode) leave mountedChartIds populated with the
+  // PREVIOUS view's mount instances; the chart components remount under the
+  // new key (see the `key=` on the chart-grid VStack below) and would never
+  // call handleChartMount again because `prev.has(id)` short-circuits.
+  // Net effect was the skeleton showing "Rendering charts… N / N" stuck
+  // forever because the eagerChartIds.every() check fails on id identity
+  // mismatch between fresh remounted-but-not-yet-registered charts and
+  // stale entries in the set. Resetting here lets the fresh onMount calls
+  // refill the set cleanly.
+  const activePanoramaView = currentProject?.active_panorama_view ?? null;
+  useEffect(() => {
+    if (activePanoramaView !== null) {
+      setMountedChartIds(new Set());
+    }
+  }, [activePanoramaView]);
 
   // v4 polish — multi-zone projects must not display the global cluster
   // view. Global clustering pools all images and ignores zone boundaries;
@@ -1866,10 +2291,44 @@ function Reports() {
 
   // Capture all exportByDefault charts. Sets `exporting` so lazy-loaded cards
   // and the clustering accordion render before html2canvas runs.
+  //
+  // v4.3 — also pre-fetch the backend's matplotlib SVGs from
+  // /api/projects/{id}/nature-bundle.zip and pass them through as
+  // `matplotlibSvgs`. captureChartsForReport will rasterise these instead
+  // of html2canvas-screenshotting the Recharts DOM, so the AI report's
+  // embedded charts share the same Nature-grade style as the standalone
+  // bundle.
   const captureChartsForDownload = useCallback(async (): Promise<CapturedChart[]> => {
     if (!hasAnalysis) return [];
     setExporting(true);
     try {
+      // Pre-load matplotlib SVGs (best effort — falls back to html2canvas
+      // for any chart_id the backend didn't render).
+      const matplotlibSvgs = new Map<string, string>();
+      if (routeProjectId) {
+        try {
+          const baseURL =
+            (import.meta.env.VITE_API_URL as string | undefined) ||
+            'http://localhost:8080';
+          const res = await fetch(
+            `${baseURL}/api/projects/${routeProjectId}/nature-bundle.zip?view=${groupingMode}&view_id=${encodeURIComponent(activeViewId)}`,
+            { method: 'GET' },
+          );
+          if (res.ok) {
+            const JSZipMod = (await import('jszip')).default;
+            const zip = await JSZipMod.loadAsync(await res.blob());
+            await Promise.all(
+              Object.values(zip.files).map(async (entry) => {
+                if (entry.dir) return;
+                const m = /\/charts\/([^/]+)\.svg$/.exec(entry.name);
+                if (m) matplotlibSvgs.set(m[1], await entry.async('string'));
+              }),
+            );
+          }
+        } catch (e) {
+          console.warn('[capture] could not pre-load nature-bundle:', e);
+        }
+      }
       // Two paint frames — first lets React commit `exporting=true`,
       // second lets ChartHosts unfold lazy bodies + the accordion.
       await waitForPaint();
@@ -1879,11 +2338,12 @@ function Reports() {
         ctx: chartCtx,
         refs: chartRefs.current,
         captionFor,
+        matplotlibSvgs: matplotlibSvgs.size > 0 ? matplotlibSvgs : undefined,
       });
     } finally {
       setExporting(false);
     }
-  }, [hasAnalysis, chartCtx, captionFor]);
+  }, [hasAnalysis, chartCtx, captionFor, routeProjectId]);
 
   // Downloads — v4 / Module 10.3.1: handleDownloadMarkdown / handleDownloadPdf
   // are kept for potential reuse but are no longer wired to UI buttons. The
@@ -1906,7 +2366,9 @@ function Reports() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `${projectName.replace(/\s+/g, '_')}_report.md`;
+    // v4.x — Tag with panorama view so consecutive view-switched downloads
+    // don't overwrite. Filename: <project>_<view>_report.md.
+    a.download = `${projectName.replace(/\s+/g, '_')}${activePanoramaView ? `_${activePanoramaView}` : ''}_report.md`;
     a.click();
     URL.revokeObjectURL(url);
     toast({
@@ -1924,7 +2386,7 @@ function Reports() {
   // out so a researcher can drop the zip straight into a paper repo.
   const handleExportBundle = useCallback(async () => {
     if (!zoneAnalysisResult) return;
-    toast({ title: 'Building export bundle…', status: 'info', duration: 2000 });
+    bundleProgress.begin('Preparing export…', `${groupingMode} view`);
     try {
       const cards = CHART_REGISTRY.filter(
         (c) => c.tab === 'analysis' && c.isAvailable(chartCtx) && !hiddenChartIds.includes(c.id),
@@ -1934,39 +2396,245 @@ function Reports() {
       // by aria-label. aria-label matching breaks when chart titles contain
       // characters CSS attribute selectors don't like (apostrophes, quotes,
       // backslashes), and refs are O(1) without any DOM scan.
+      // Pull the LLM "What this means" interpretation for each chart out of
+      // the React Query cache. Each card's useChartSummary uses a key of
+      // ['chart-summary', chartId, projectId, groupingMode, payload]; we look
+      // up the most recent successful entry for (chartId × projectId ×
+      // groupingMode) and attach it to the bundle as summaries/*.json so the
+      // paper-writer has the model's reading alongside the figure itself.
+      const summaryQueries = queryClient
+        .getQueryCache()
+        .findAll({ queryKey: ['chart-summary'] });
+      const summaryByChartId = new Map<string, Record<string, unknown>>();
+      for (const q of summaryQueries) {
+        const key = q.queryKey as unknown[];
+        // [tag, chartId, projectId, groupingMode, payload]
+        if (key[2] !== routeProjectId) continue;
+        if (key[3] !== groupingMode) continue;
+        const data = q.state.data as Record<string, unknown> | undefined;
+        if (!data) continue;
+        const chartId = String(key[1] ?? '');
+        if (!chartId) continue;
+        // Prefer the most recently updated entry if there are multiple
+        // (different payload snapshots).
+        const existing = summaryByChartId.get(chartId);
+        if (
+          !existing ||
+          (q.state.dataUpdatedAt ?? 0) >
+            (Number(existing.__dataUpdatedAt) || 0)
+        ) {
+          summaryByChartId.set(chartId, {
+            ...data,
+            __dataUpdatedAt: q.state.dataUpdatedAt,
+          });
+        }
+      }
+
+      // v4.6 — pre-warm any summary not yet in the React Query cache.
+      // useChartSummary fires lazily (only on panel-open), so users who
+      // export without scrolling through every clustering panel would
+      // be missing ~8 summaries. Fan them out in parallel here.
+      const missingForPrewarm = cards.filter((c) => {
+        const has = summaryByChartId.has(c.id);
+        const fn = (c as { summaryPayload?: (ctx: unknown) => unknown }).summaryPayload;
+        return !has && typeof fn === 'function';
+      });
+      if (missingForPrewarm.length > 0) {
+        bundleProgress.setPhase(
+          `Generating ${missingForPrewarm.length} chart summaries…`,
+          'LLM "what this means" interpretations',
+        );
+        await Promise.all(
+          missingForPrewarm.map(async (c) => {
+            try {
+              const fn = (c as { summaryPayload: (ctx: unknown) => Record<string, unknown> | null }).summaryPayload;
+              const payload = fn(chartCtx);
+              if (payload == null) return;
+              const resp = await api.analysis.chartSummary({
+                chart_id: c.id,
+                chart_title: c.title,
+                chart_description:
+                  (c as { description?: string | null }).description ?? null,
+                project_id: routeProjectId ?? '',
+                payload,
+                project_context: chartProjectContext,
+                grouping_mode: groupingMode,
+              });
+              if (resp?.data) {
+                summaryByChartId.set(
+                  c.id,
+                  resp.data as unknown as Record<string, unknown>,
+                );
+              }
+            } catch (err) {
+              console.warn(`[bundle] pre-warm summary for ${c.id} failed:`, err);
+            }
+          }),
+        );
+      }
+
       const artifacts = cards.map((c) => {
         const handle = chartRefs.current.get(c.id);
         const tab = c.exportRows ? c.exportRows(chartCtx) : null;
+        const summary = summaryByChartId.get(c.id) ?? null;
+        if (summary) {
+          // Drop internal sort key before serializing.
+          delete (summary as Record<string, unknown>).__dataUpdatedAt;
+        }
         return {
           chartId: c.id,
           title: c.title,
           node: handle?.getNode() ?? null,
           rows: tab?.rows,
           columns: tab?.columns,
+          aiSummary: summary,
         };
       });
+      // The longest phase: the backend redraws every chart with matplotlib
+      // and returns the whole .zip in one blocking request — there is no
+      // sub-progress to read, so the elapsed-time counter on the card
+      // carries the "it's still working" signal here.
+      bundleProgress.setPhase(
+        'Rendering charts on the server…',
+        `${groupingMode} view · publication-grade SVGs, can take 30–90s`,
+      );
+
+      // Pull the publication-grade SVGs from the backend so every chart
+      // in the bundle is rendered by matplotlib (Liberation Sans + elite
+      // muted palette, no HTML-legend overflow). If the server is
+      // unreachable we silently fall back to the live-DOM capture so the
+      // bundle is never empty.
+      const natureSvgs = new Map<string, string>();
+      if (routeProjectId) {
+        try {
+          const baseURL =
+            (import.meta.env.VITE_API_URL as string | undefined) ||
+            'http://localhost:8080';
+          const res = await fetch(
+            `${baseURL}/api/projects/${routeProjectId}/nature-bundle.zip?view=${groupingMode}&view_id=${encodeURIComponent(activeViewId)}`,
+            { method: 'GET' },
+          );
+          if (res.ok) {
+            const JSZipMod = (await import('jszip')).default;
+            const zip = await JSZipMod.loadAsync(await res.blob());
+            await Promise.all(
+              Object.values(zip.files).map(async (entry) => {
+                if (entry.dir) return;
+                const mSvg = /\/charts\/([^/]+)\.svg$/.exec(entry.name);
+                if (mSvg) {
+                  natureSvgs.set(mSvg[1], await entry.async('string'));
+                  return;
+                }
+                // v4.2 — also harvest the per-chart LLM summaries the
+                // backend now writes to summaries/<chart_id>.json. Without
+                // this the FE's exportBundle would discard them (it only
+                // writes summaries from React Query cache, which is empty
+                // unless the user clicked "What this means" on every card).
+                const mSum = /\/summaries\/([^/]+)\.json$/.exec(entry.name);
+                if (mSum) {
+                  try {
+                    const text = await entry.async('string');
+                    const obj = JSON.parse(text) as Record<string, unknown>;
+                    if (!summaryByChartId.has(mSum[1])) {
+                      summaryByChartId.set(mSum[1], obj);
+                    }
+                  } catch (e) {
+                    console.warn('[bundle] failed to parse summary',
+                                 mSum[1], e);
+                  }
+                }
+              }),
+            );
+          } else {
+            console.warn(
+              '[bundle] nature-bundle endpoint returned',
+              res.status,
+              '— falling back to live-DOM SVGs',
+            );
+          }
+        } catch (e) {
+          console.warn(
+            '[bundle] nature-bundle fetch failed; falling back to DOM:',
+            e,
+          );
+        }
+      }
+
+      bundleProgress.setStep(
+        0,
+        artifacts.length,
+        'Packaging bundle…',
+        natureSvgs.size > 0
+          ? `Nature SVGs: ${natureSvgs.size} · ${groupingMode} view`
+          : `${groupingMode} view (live-DOM SVGs)`,
+      );
+
+      // v4.x — Tag bundle slug with panorama view AND active viewId so
+      // consecutive downloads across (Left/Front/Right) × (zones/clusters/
+      // parent_zones/all_sub_clusters/within_zone:*) don't collide.
+      // Previous version only included panorama view + groupingMode; that
+      // produced the same filename for e.g. "front + all_sub_clusters"
+      // and "front + within_zone:zone_3" since both have groupingMode=clusters.
+      // viewId is sanitized (':' → '__') so it's filesystem-safe.
+      const viewIdSafe = activeViewId.replace(/[^a-zA-Z0-9_-]/g, '_');
+      const bundleProjectSlug = [
+        currentProject?.project_name ?? 'project',
+        activePanoramaView ?? null,
+        viewIdSafe,
+      ].filter(Boolean).join('_');
+
       const result = await exportBundle({
         charts: artifacts,
-        projectSlug: currentProject?.project_name ?? 'project',
+        projectSlug: bundleProjectSlug,
         projectName: currentProject?.project_name ?? null,
         groupingMode,
         aiReport: aiReport ?? null,
         aiReportMeta: aiReportMeta ?? null,
+        // v4.x — also hand the strategies payload to the ZIP packager so the
+        // client-side bundle mirrors the server-rendered nature-bundle layout
+        // (design_strategies.md + design_strategies.json). designStrategyResult
+        // is already the per-view slot Reports.tsx keeps in sync with the
+        // active drill, so no extra lookup needed.
+        designStrategies: (designStrategyResult ?? null) as Record<string, unknown> | null,
+        chartSvgOverrides: natureSvgs.size > 0 ? natureSvgs : undefined,
         extraMetadata: {
+          // v4.x — explicit baseline fields so anyone opening the bundle
+          // later can see what pool the |z| values were calibrated against
+          // without having to interpret the filename.
+          panorama_view: activePanoramaView ?? null,
+          view_id: activeViewId,
+          baseline_label: friendlyViewLabel(activeViewId, currentProject?.spatial_zones),
+          baseline_units: zoneAnalysisResult.zone_diagnostics?.length ?? 0,
+          // v4.x - signal to the bundle packager that some cross-grouping
+          // charts (B1/B2/B3/B4/D3) were intentionally hidden because the
+          // active view only has 1 or 2 grouping units. exportBundle uses
+          // this to add a clear "Hidden charts" section in README.md so
+          // anyone opening the ZIP later understands why those charts are
+          // missing from the bundle.
+          degenerate_n2_active: isDegenerateN2Grouping,
+          degenerate_n2_hidden_chart_ids: isDegenerateN2Grouping
+            ? Array.from(DEGENERATE_AT_N2_CHART_IDS)
+            : [],
+          cross_view_warning: 'Numeric values (|z|, z-scores, correlations) in this bundle are calibrated against the baseline above. Do NOT cross-compare with bundles exported from other views — their baselines differ.',
           zone_count: zoneAnalysisResult.zone_diagnostics?.length ?? 0,
           analysis_mode: zoneAnalysisResult.analysis_mode,
           zone_source: zoneAnalysisResult.zone_source,
           design_strategies_present: !!designStrategyResult,
+          nature_svg_count: natureSvgs.size,
+        },
+        onProgress: ({ current, total, title }) => {
+          bundleProgress.setStep(current, total, 'Packaging bundle…', title);
         },
       });
-      toast({
-        title: `Bundle ready: ${result.filename}`,
-        description: `${result.charts} chart(s) · ${result.csvs} CSV(s)`,
-        status: 'success',
-      });
+      bundleProgress.succeed(
+        `Bundle ready: ${result.filename}`,
+        `${result.charts} chart(s) · ${result.csvs} CSV` +
+          (result.pngs > 0 ? ` · ${result.pngs} PNG` : '') +
+          ` · ${result.summaries} AI summary`,
+      );
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Bundle export failed';
-      toast({ title: message, status: 'error' });
+      bundleProgress.fail(message);
     }
   }, [
     zoneAnalysisResult,
@@ -1977,7 +2645,9 @@ function Reports() {
     aiReport,
     aiReportMeta,
     designStrategyResult,
-    toast,
+    queryClient,
+    routeProjectId,
+    bundleProgress,
   ]);
 
   const handleExportJson = () => {
@@ -1992,9 +2662,18 @@ function Reports() {
       metrics: img.metrics_results,
     })) ?? [];
 
+    // v4.x — Tag exports with the active panorama view so consecutive
+    // downloads across Left/Front/Right don't overwrite each other in the
+    // user's Downloads folder. The data inside is already per-view-correct
+    // (zoneAnalysisResult + uploaded_images[].metrics_results both reflect
+    // the active view after the backend mirror); the only thing missing
+    // before this fix was filename disambiguation.
+    const panoramaViewTag = activePanoramaView ? `_${activePanoramaView}` : '';
+
     const data = {
       project_name: projectName,
       project_location: currentProject?.project_location ?? null,
+      panorama_view: activePanoramaView ?? null,
       exported_at: new Date().toISOString(),
       recommendations,
       selected_indicators: selectedIndicators,
@@ -2007,7 +2686,7 @@ function Reports() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `${projectName.replace(/\s+/g, '_')}_data.json`;
+    a.download = `${projectName.replace(/\s+/g, '_')}${panoramaViewTag}_data.json`;
     a.click();
     URL.revokeObjectURL(url);
     toast({ title: 'JSON exported', status: 'success' });
@@ -2015,8 +2694,15 @@ function Reports() {
 
   const handleExportExcel = async () => {
     try {
+      excelProgress.begin('Building Excel workbook…', 'Writing indicator tables and statistics');
+      // v4.x — Suffix project name with the active panorama view so
+      // Left/Front/Right downloads land as separate files. The exportExcel
+      // helper uses projectName as the filename root.
+      const taggedName = activePanoramaView
+        ? `${projectName}_${activePanoramaView}`
+        : projectName;
       await exportAnalysisExcel({
-        projectName,
+        projectName: taggedName,
         images: currentProject?.uploaded_images ?? [],
         zoneStats: zoneAnalysisResult?.zone_statistics ?? [],
         diagnostics: zoneAnalysisResult?.zone_diagnostics ?? [],
@@ -2024,9 +2710,9 @@ function Reports() {
         pvalueByLayer: zoneAnalysisResult?.pvalue_by_layer ?? null,
         globalStats: zoneAnalysisResult?.global_indicator_stats ?? [],
       });
-      toast({ title: 'Excel exported', status: 'success' });
+      excelProgress.succeed('Excel exported');
     } catch {
-      toast({ title: 'Excel export failed', status: 'error' });
+      excelProgress.fail('Excel export failed');
     }
   };
 
@@ -2289,7 +2975,7 @@ function Reports() {
             </Button>
           </Tooltip>
           <Tooltip
-            label="ZIP bundle: every chart as SVG + CSV, the AI report, and metadata.json. Filename includes the active grouping mode so zone-mode and cluster-mode bundles don't overwrite each other."
+            label="ZIP bundle: every chart redrawn server-side by matplotlib (Nature-grade SVGs) + CSV tables + per-chart LLM interpretation + the AI report. Filename includes the active grouping mode so zone-mode and cluster-mode bundles don't overwrite each other."
             placement="bottom"
             hasArrow
           >
@@ -2398,6 +3084,7 @@ function Reports() {
               triggers the single-zone prompt branch (Module 11.2.1) and
               Dual View triggers the multi-archetype prompt. */}
           {hasAnalysis && !singleZoneGated && !multiZoneGated && (
+            <ErrorBoundary label="AI Report card">
             <Card
               mb={6}
               borderColor={aiReport ? 'purple.300' : 'gray.200'}
@@ -2408,6 +3095,41 @@ function Reports() {
             >
               <CardHeader>
                 <VStack align="stretch" spacing={3}>
+                  {/* v4.x — Baseline declaration banner. Surfaces "this report
+                      is calibrated against pool X (N units)" so users don't
+                      cross-compare numbers from reports generated under
+                      different views (e.g. "All sub-clusters" gives different
+                      |z| than "Road 1 drill-down" for the same underlying
+                      cluster). Pure UI; no data change. */}
+                  {(() => {
+                    const baselineUnits = chartCtx.sortedDiagnostics?.length ?? 0;
+                    if (baselineUnits === 0) return null;
+                    const baselineName = friendlyViewLabel(activeViewId, currentProject?.spatial_zones);
+                    const panoramaSuffix = currentProject?.active_panorama_view
+                      ? ` · panorama view: ${currentProject.active_panorama_view}`
+                      : '';
+                    return (
+                      <HStack
+                        px={3}
+                        py={2}
+                        spacing={2}
+                        bg="purple.50"
+                        borderRadius="md"
+                        borderWidth={1}
+                        borderColor="purple.200"
+                        flexWrap="wrap"
+                        fontSize="xs"
+                      >
+                        <Text color="purple.800" fontWeight="bold">Baseline:</Text>
+                        <Badge colorScheme="purple" variant="solid">
+                          {baselineName} — {baselineUnits} unit{baselineUnits === 1 ? '' : 's'}
+                        </Badge>
+                        <Text color="gray.700">
+                          |z| values are calibrated against these {baselineUnits} grouping unit{baselineUnits === 1 ? '' : 's'} only{panoramaSuffix}. Cross-view comparison is not meaningful.
+                        </Text>
+                      </HStack>
+                    );
+                  })()}
                   <HStack spacing={2} flexWrap="wrap">
                     <Icon as={Sparkles} color="purple.500" boxSize={5} />
                     <Heading size="md">AI Report</Heading>
@@ -2507,7 +3229,8 @@ function Reports() {
                           const url = URL.createObjectURL(blob);
                           const a = document.createElement('a');
                           a.href = url;
-                          a.download = `${projectName.replace(/\s+/g, '_')}_ai_report.md`;
+                          // v4.x — Per-view filename tag, see exportJson/Excel/Bundle handlers.
+                          a.download = `${projectName.replace(/\s+/g, '_')}${activePanoramaView ? `_${activePanoramaView}` : ''}_ai_report.md`;
                           a.click();
                           URL.revokeObjectURL(url);
                         }}>
@@ -2605,8 +3328,14 @@ function Reports() {
                       activeViewId so a parent_zones report doesn't
                       falsely flag as mismatched against legacy 'zones'. */}
                   {(() => {
-                    const reportViewId = (aiReportMeta?.view_id as string | undefined)
-                      ?? (aiReportMeta?.grouping_mode as string | undefined);
+                    // Only trust the fine-grained `view_id` for the stale-view
+                    // check. The legacy `grouping_mode` is coarse ('zones' /
+                    // 'clusters') and NEVER equals a fine activeViewId like
+                    // 'within_zone:zone_X' / 'parent_zones', so falling back to
+                    // it false-flagged every multi-view report as "written for
+                    // the clusters view" even when it matched. Reports generated
+                    // before view_id was stamped into the meta simply won't warn.
+                    const reportViewId = aiReportMeta?.view_id as string | undefined;
                     if (!reportViewId || reportViewId === activeViewId) return null;
                     return (
                       <Alert status="warning" mb={3} borderRadius="md" alignItems="flex-start">
@@ -2683,6 +3412,7 @@ function Reports() {
                 </CardBody>
               )}
             </Card>
+            </ErrorBoundary>
           )}
 
           {/* Main Tabs */}
@@ -2695,7 +3425,11 @@ function Reports() {
 
             <TabPanels>
               {/* ── Tab: Analysis (5-panel narrative — PDF #7) ── */}
+              {/* v4.x — Per-tab ErrorBoundary so a crash in one tab doesn't
+                  take out the other two. Each tab has its own label so the
+                  user can see WHICH tab failed and report it back. */}
               <TabPanel px={0}>
+              <ErrorBoundary label="Analysis tab">
                 {/* #2 — pipeline-running gate. While the pipeline is in flight
                     for THIS project, suppress the analysis grid entirely and
                     surface a single progress card. Stale results from a
@@ -2772,12 +3506,12 @@ function Reports() {
                       // generate only when user clicks Generate AI Report.
                     }}
                     onPickCluster={handleRunClustering}
-                    isClusteringRunning={clusteringMutation.isPending}
+                    isClusteringRunning={clusteringMutation.isPending || isMultiViewClustering}
                     canRunClustering={!!currentProject || !!routeProjectId}
                   />
                 ) : multiZoneGated ? (
                   // v4 / Module 1 (multi-zone) — two-card branching:
-                  // Zone-only or Within-zone HDBSCAN. Picking either fires
+                  // Zone-only or Within-zone GMM. Picking either fires
                   // strategies generation immediately.
                   <MultiZoneEntryGate
                     zoneCount={userZoneCount}
@@ -2788,7 +3522,7 @@ function Reports() {
                       // generate only when user clicks Generate AI Report.
                     }}
                     onPickWithinZoneCluster={handleRunWithinZoneClustering}
-                    isClusteringRunning={withinZoneClusteringMutation.isPending}
+                    isClusteringRunning={withinZoneClusteringMutation.isPending || isMultiViewClustering}
                     canRunClustering={!!currentProject || !!routeProjectId}
                   />
                 ) : (
@@ -2796,6 +3530,164 @@ function Reports() {
                 {/* v4 / Module 1 — Single View upgrade banner removed:
                     duplicated with the existing Single-Zone Mode banner
                     surfaced by the chart grid below. */}
+                {/* v4.x — Panorama view selector. Renders ABOVE the existing
+                    zones/clusters segmented control when the project has
+                    `active_panorama_views` set (i.e. user enabled panorama
+                    mode in Vision Analysis). Clicking a view PUTs the
+                    project with the new `active_panorama_view`, which on
+                    the backend mirrors `panorama_view_results[view]` into
+                    the legacy top-level slots. We then refetch the project
+                    so every downstream chart/report consumer sees the new
+                    view's results. The inner zones/clusters control still
+                    works orthogonally inside each panorama view. */}
+                {(() => {
+                  const storedViews = currentProject?.active_panorama_views ?? [];
+                  if (storedViews.length === 0) return null;
+                  // v4.x — Panorama mode is now all-or-nothing (per-view picker
+                  // retired). If the project carries a stale partial selection
+                  // (e.g. ["left", "right"] from when the user unchecked Front
+                  // in the old CheckboxGroup), render the full Left/Front/Right
+                  // segmented control and write the normalized full set back
+                  // to the project so the pipeline / vision / cluster loops
+                  // pick it up on the next run.
+                  const fullSet = ['left', 'front', 'right'];
+                  const isFullSet = storedViews.length === 3 && fullSet.every(v => storedViews.includes(v));
+                  const panoramaViews = isFullSet ? storedViews : fullSet;
+                  if (!isFullSet && currentProject?.id) {
+                    // Fire-and-forget; the segmented control renders the full
+                    // set immediately regardless of when this PATCH lands.
+                    api.projects.update(currentProject.id, { active_panorama_views: fullSet })
+                      .catch(err => console.error('Normalize active_panorama_views failed', err));
+                  }
+                  const activeView = currentProject?.active_panorama_view ?? panoramaViews[0];
+                  const viewLabel = (v: string) => v.charAt(0).toUpperCase() + v.slice(1);
+                  const handleSwitchPanoramaView = async (view: string) => {
+                    if (view === activeView) return;
+                    if (!currentProject?.id) return;
+                    try {
+                      // Switch the active panorama view on the BACKEND; update_project
+                      // mirrors panorama_view_results[view] into the top-level slots and
+                      // becomes the single source of truth. We refetch (below) so
+                      // hydrateFromProject repopulates every per-view slot. Awaited PUT +
+                      // refetch keeps SQLite and the UI consistent.
+                      //
+                      // NOTE: an "instant" client-side mirror (build the next project in
+                      // memory + setQueryData, with a fire-and-forget PUT) was tried to
+                      // avoid this ~14MB round-trip, but it (a) fed stale per-view data so
+                      // the AI report / confidence didn't update on switch and (b) raced
+                      // the next pipeline run (images skipped until re-clicked). Reverted
+                      // for correctness; if the round-trip is too slow, shrink the
+                      // persisted project payload server-side instead.
+                      await api.projects.update(currentProject.id, { active_panorama_view: view });
+                      const store = useAppStore.getState();
+                      // Clear ONLY the data snapshots tied to the OLD
+                      // panorama view — the in-memory clusters/zone-cache
+                      // that `hydrateFromProject`'s same-project refetch
+                      // guard (useAppStore.ts:440-444: `inClusterView ?
+                      // state.clusterAnalysisResult : ...`) would otherwise
+                      // keep painting over the freshly-mirrored project
+                      // payload.
+                      //
+                      // What we DELIBERATELY preserve across the switch:
+                      //   • singleZoneStrategy / multiZoneStrategy — the
+                      //     entry-gate (Option A/B/C) pick. Per UX, the
+                      //     entry-gate sits ABOVE panorama view in the
+                      //     navigation hierarchy: picking Option C once
+                      //     means "I want Dual View for this project",
+                      //     and that should carry across every view switch.
+                      //   • groupingMode / activeViewId — the user's
+                      //     in-option toggle position (Zone view vs
+                      //     Cluster view inside Option C). If they were
+                      //     looking at clusters on Left, they should land
+                      //     on clusters on Front; the existing
+                      //     `wantsClusterButMissing` hint card already
+                      //     prompts them to "Re-run clustering" when the
+                      //     new view's clusterAnalysisResult is empty,
+                      //     which is the right "this view hasn't been
+                      //     clustered yet" surface.
+                      //   Resetting either of these would bounce the user
+                      //   back to the entry-gate or flip them into Zone
+                      //   view — both reported as buggy UX.
+                      store.setClusterAnalysisResult(null);
+                      store.setUserZoneAnalysisResult(null);
+                      store.setAnalysisViewsByViewId({});
+                      // Drop the cached zone_analysis_result so any component
+                      // reading `state.zoneAnalysisResult` directly (rather
+                      // than waiting for hydration) doesn't show stale data
+                      // for a render frame.
+                      store.setZoneAnalysisResult(null);
+                      // v4.x — Also clear AI report + design strategy slots so
+                      // the previous panorama view's narrative doesn't bleed
+                      // through into the new view for the render frame before
+                      // hydration completes. hydrateFromProject will
+                      // repopulate them from the new view's bucket via the
+                      // backend mirror in update_project (panorama_view_results
+                      // [view]["ai_reports"] / ["design_strategy_results"]).
+                      // setAiReport(null) ALSO writes
+                      // aiReportsByViewId[activeViewId] = null as a side
+                      // effect (see store action). For the brief moment
+                      // before hydrateFromProject overwrites the whole
+                      // aiReportsByViewId dict from the new view's bucket,
+                      // this gives us a clean "no report" state instead of
+                      // leaking the old panorama view's report into the
+                      // first paint of the new view. Hydration runs
+                      // milliseconds later via invalidateQueries → refetch
+                      // → App.tsx's useEffect → hydrateFromProject, which
+                      // replaces the full dicts.
+                      store.setAiReport(null);
+                      store.setAiReportMeta(null);
+                      store.setDesignStrategyResult(null);
+                      // Refetch the project so hydrateFromProject repopulates the store
+                      // from the backend's per-view mirror (the single source of truth).
+                      queryClient.invalidateQueries({ queryKey: queryKeys.project(currentProject.id) });
+                    } catch (err) {
+                      console.error('Switch panorama view failed', err);
+                    }
+                  };
+                  return (
+                    <VStack mb={4} spacing={2} align="stretch">
+                      <HStack spacing={0} align="center">
+                        <Text fontSize="xs" fontWeight="bold" color="gray.600" mr={3}>
+                          Panorama view:
+                        </Text>
+                        {(['left', 'front', 'right'] as const).map((v, i, arr) => {
+                          const enabled = panoramaViews.includes(v);
+                          if (!enabled) return null;
+                          const hasResult = !!(currentProject?.panorama_view_results?.[v]);
+                          const isFirst = i === 0 || arr.slice(0, i).every(x => !panoramaViews.includes(x));
+                          const isLast = i === arr.length - 1 || arr.slice(i + 1).every(x => !panoramaViews.includes(x));
+                          return (
+                            <Button
+                              key={v}
+                              size="sm"
+                              variant={activeView === v ? 'solid' : 'outline'}
+                              colorScheme="purple"
+                              borderLeftRadius={isFirst ? undefined : 0}
+                              borderRightRadius={isLast ? undefined : 0}
+                              // Block panorama switching WHILE a report is
+                              // generating: the streaming generate does a
+                              // full-project save at the end, and a switch
+                              // PUT firing concurrently is a read-modify-write
+                              // race that can drop the just-saved report.
+                              // handleGenerateAiReport awaits a project refetch
+                              // before clearing this flag, so by the time the
+                              // buttons re-enable the cache + DB are settled.
+                              isDisabled={isGeneratingAiReport}
+                              onClick={() => handleSwitchPanoramaView(v)}
+                            >
+                              {viewLabel(v)}{hasResult ? '' : ' (not run)'}
+                            </Button>
+                          );
+                        })}
+                      </HStack>
+                      <Text fontSize="2xs" color="gray.500">
+                        Each panorama view has its own independent indicator / clustering /
+                        report bucket. Switching here swaps the displayed view without
+                        re-running anything.
+                      </Text>
+                    </VStack>
+                  );
+                })()}
                 {/* v4 / Phase C — view selector. Two layouts depending on
                     whether the project has within-zone clustering active:
                       • Legacy (single-zone Option C, multi-zone zone-only):
@@ -2866,7 +3758,7 @@ function Reports() {
                             {/* v4 polish — global "Cluster view" is single-zone
                                 only. For multi-zone projects (userZoneCount ≥ 2),
                                 clustering must respect the user's zone definition,
-                                which means within-zone HDBSCAN, not pooled
+                                which means within-zone GMM, not pooled
                                 clustering across all images. The within-zone
                                 path is reached through the entry gate (Run
                                 Within-Zone Clustering button), not this toggle.
@@ -2932,7 +3824,7 @@ function Reports() {
                 {wantsClusterButMissing && (
                   <ClusterEmptyHint
                     onRunClustering={handleRunClustering}
-                    isClusteringRunning={clusteringMutation.isPending}
+                    isClusteringRunning={clusteringMutation.isPending || isMultiViewClustering}
                     canRunClustering={!!currentProject}
                   />
                 )}
@@ -2956,7 +3848,7 @@ function Reports() {
                     }
                     imageCount={chartCtx.imageRecords.length}
                     onRunClustering={handleRunClustering}
-                    isClusteringRunning={clusteringMutation.isPending}
+                    isClusteringRunning={clusteringMutation.isPending || isMultiViewClustering}
                     canRunClustering={!!currentProject}
                     hideClusteringButton={clusteringLocked}
                   />
@@ -2987,7 +3879,7 @@ function Reports() {
                     zoneCount={chartCtx.sortedDiagnostics.length}
                     imageCount={chartCtx.imageRecords.length}
                     onRunClustering={handleRunWithinZoneClustering}
-                    isClusteringRunning={withinZoneClusteringMutation.isPending}
+                    isClusteringRunning={withinZoneClusteringMutation.isPending || isMultiViewClustering}
                     canRunClustering={!!currentProject}
                     hideClusteringButton={isClusterDerived}
                     showDegenerateNTwoWarning
@@ -3050,7 +3942,7 @@ function Reports() {
                 {/* v4 / Module 1 — chart-grid gate. Originally required at
                     least one zone diagnostic, which made sense in zone-level
                     mode but unintentionally hid every single-zone chart
-                    (A1/A2 setup, C1/C3/C4 distribution + spatial, D1 global
+                    (A1/A2 setup, C1-C4 distribution + spatial, D1 global
                     stats) for image_level projects. After Single View was
                     introduced, those charts MUST render even when
                     sortedDiagnostics is empty — they're the whole point of
@@ -3094,7 +3986,36 @@ function Reports() {
                       </VStack>
                     </Box>
                   )}
+                  <ErrorBoundary
+                    // v4.x — Defense-in-depth against white-screens. The
+                    // chart grid below is the densest crash surface (Recharts
+                    // custom renderers, archetype label paths, post-view-
+                    // switch state desync). Per-call null guards plug each
+                    // known throw site, but the ErrorBoundary makes sure ANY
+                    // unhandled crash in one chart collapses to a recoverable
+                    // inline alert instead of taking out the whole Reports
+                    // page. User can click "Try to recover" after they
+                    // switch view / re-run clustering to fix the underlying
+                    // state, no page reload required.
+                    label="Analysis charts"
+                    // Keying on activePanoramaView resets the boundary state
+                    // automatically on every view switch — so a crash on
+                    // (Left, clusters) doesn't keep the error alert stuck
+                    // when the user switches to Front.
+                    key={`panorama-${activePanoramaView ?? 'default'}-boundary`}
+                  >
                   <VStack
+                    // v4.x — keyed on panorama view so switching Left/Front/
+                    // Right fully unmounts and remounts every chart in this
+                    // subtree. Without this, React keeps chart components
+                    // alive across view switches and just feeds them new
+                    // data; chart components whose initial-mount-only effects
+                    // (handleChartMount, internal layout calcs) computed
+                    // against the OLD view's data would never re-fire, and
+                    // the skeleton overlay above would sit at stale-content
+                    // "N / N" forever. Pairs with the mountedChartIds reset
+                    // effect above.
+                    key={`panorama-${activePanoramaView ?? 'default'}`}
                     spacing={6}
                     align="stretch"
                     style={{ visibility: allChartsReady ? 'visible' : 'hidden' }}
@@ -3174,9 +4095,13 @@ function Reports() {
                           <Box flex="1" textAlign="left">
                             <HStack spacing={2}>
                               <Text fontWeight="bold" fontSize="sm">Clusters</Text>
-                              {clusteringResult?.clustering && (
+                              {/* v4.x — k/silhouette badge per-drill via
+                                  ChartContext, same source-priority as the
+                                  chips below (per-view clustering wins over
+                                  project-level fallback). */}
+                              {chartCtx.effectiveClustering && (
                                 <Badge colorScheme="green" fontSize="2xs">
-                                  k={clusteringResult.clustering.k} · silhouette={clusteringResult.clustering.silhouette_score.toFixed(2)}
+                                  k={chartCtx.effectiveClustering.k} · silhouette={chartCtx.effectiveClustering.silhouette_score.toFixed(2)}
                                 </Badge>
                               )}
                               {clusteringResult?.skipped && (
@@ -3184,7 +4109,7 @@ function Reports() {
                               )}
                             </HStack>
                             <Text fontSize="xs" color="gray.600" mt={0.5}>
-                              Density-based clusters (HDBSCAN) discovered from per-image indicator values. Each cluster groups images that share a similar visual signature.
+                              Clusters (GMM, BIC-selected K) discovered from per-image indicator values. Each cluster groups images that share a similar visual signature.
                             </Text>
                           </Box>
                           <AccordionIcon />
@@ -3203,17 +4128,49 @@ function Reports() {
                                 {clusteringResult?.clustering ? 'Re-run clustering' : 'Run clustering'}
                               </Button>
                             </HStack>
-                            {clusteringResult?.clustering && clusteringResult.clustering.archetype_profiles.length > 0 && (
-                              <Wrap spacing={2}>
-                                {clusteringResult.clustering.archetype_profiles.map(a => (
-                                  <WrapItem key={a.archetype_id}>
-                                    <Tag size="sm" colorScheme="teal" variant="subtle">
-                                      <TagLabel>Cluster {a.archetype_id}: {a.archetype_label} ({a.point_count} pts)</TagLabel>
-                                    </Tag>
-                                  </WrapItem>
-                                ))}
-                              </Wrap>
-                            )}
+                            {/* v4.x — Archetype chips per-drill.
+                                Reads from chartCtx.effectiveClustering which
+                                prefers zoneAnalysisResult.clustering (per-view,
+                                set by the within-zones endpoint on each
+                                analysis_views[viewId].clustering) over the
+                                project-level clusteringResult.clustering
+                                fallback (which is first_cl, only the first
+                                zone's GMM — would be stuck on Road 1
+                                regardless of drill).
+                                For single-zone Option C, effectiveClustering
+                                = the pooled GMM result (cards = chips, same
+                                source). For multi-zone within-zone drills,
+                                effectiveClustering = that drill's clustering:
+                                  • within_zone:zone_X → that zone's GMM
+                                  • all_sub_clusters    → composite of all
+                                    zones' archetypes (re-IDed, labels
+                                    prefixed with parent zone name)
+                                  • parent_zones        → null (no chips —
+                                    parent zones are zone-level units, not
+                                    cluster-level) */}
+                            {(() => {
+                              const ec = chartCtx.effectiveClustering;
+                              if (!ec || !ec.archetype_profiles || ec.archetype_profiles.length === 0) return null;
+                              return (
+                                <Wrap spacing={2}>
+                                  {ec.archetype_profiles.map((a, idx) => (
+                                    // v4.x — Defensive React key. archetype_id
+                                    // is normally unique per drill, but the
+                                    // composite all_sub_clusters bucket can
+                                    // briefly emit duplicates if any upstream
+                                    // re-ID path slips (GMM non-consecutive
+                                    // ids etc.). Pair the id with the array
+                                    // index so React never sees a duplicate key
+                                    // even during a stale render frame.
+                                    <WrapItem key={`${a.archetype_id ?? 'na'}-${idx}`}>
+                                      <Tag size="sm" colorScheme="teal" variant="subtle">
+                                        <TagLabel>Cluster {a.archetype_id}: {a.archetype_label ?? '—'} ({a.point_count ?? 0} pts)</TagLabel>
+                                      </Tag>
+                                    </WrapItem>
+                                  ))}
+                                </Wrap>
+                              );
+                            })()}
                             {clusteringCharts.map(chart => (
                               <ChartHost
                                 key={chart.id}
@@ -3265,6 +4222,11 @@ function Reports() {
                         </VStack>
                       );
 
+                      // v4.x - prefer mode-aware title/subtitle when defined
+                      // (e.g. "Cluster-Level Findings" in clusters view). Falls back
+                      // to the static title for sections without mode overload.
+                      const accordionTitle = meta.titleByMode?.(groupingMode) ?? meta.title;
+                      const accordionSubtitle = meta.subtitleByMode?.(groupingMode) ?? meta.subtitle;
                       if (meta.defaultCollapsed) {
                         return (
                           <Accordion
@@ -3276,10 +4238,10 @@ function Reports() {
                               <AccordionButton bg="gray.50" _hover={{ bg: 'gray.100' }}>
                                 <Box flex="1" textAlign="left">
                                   <Text fontWeight="bold" fontSize="sm" color="gray.700">
-                                    {meta.title}
+                                    {accordionTitle}
                                   </Text>
                                   <Text fontSize="xs" color="gray.500" mt={0.5}>
-                                    {meta.subtitle}
+                                    {accordionSubtitle}
                                   </Text>
                                 </Box>
                                 <AccordionIcon />
@@ -3321,30 +4283,55 @@ function Reports() {
                         original render position here is intentionally
                         empty. */}
                   </VStack>
+                  </ErrorBoundary>
                   </Box>
                 )}
                   </>
                 )}
+              </ErrorBoundary>
               </TabPanel>
 
               {/* ── Tab: Design Strategies ── */}
               {hasAnalysis && (
                 <TabPanel px={0}>
-                  {/* v4 / Module 14 — view-mode hint. Strategies are stored
-                      per-view (zones / clusters), so toggling the segmented
-                      control above swaps which set is shown. The hint banner
-                      mirrors the AI Report card's grouping_mode banner so
-                      users have one consistent mental model: every Reports
-                      artifact (charts, strategies, AI report) follows the
-                      active view. The "other view available" Badge tells the
-                      user when a flip back would surface a different cached
-                      result — preventing the surprise of "where did my old
-                      strategies go?" after toggling. */}
-                  {hasDesign && designStrategyResult && (() => {
-                    // v4 / Phase C — view-aware strategies hint. Lists
-                    // every OTHER view that has cached strategies so the
-                    // user knows toggling the segmented control surfaces
-                    // a different cached set rather than blank state.
+                <ErrorBoundary label="Design Strategies tab">
+                  {/* v4.x — Baseline declaration banner (mirrors AI Report
+                      card). Strategies for the same grouping unit differ
+                      across views because the underlying |z| / diagnostics
+                      differ — user needs to see what pool this strategy set
+                      was calibrated against. Always render when designs
+                      exist (independent of aiReport). */}
+                  {hasDesign && designStrategyResult && aiReport && (() => {
+                    const baselineUnits = chartCtx.sortedDiagnostics?.length ?? 0;
+                    if (baselineUnits === 0) return null;
+                    const baselineName = friendlyViewLabel(activeViewId, currentProject?.spatial_zones);
+                    const panoramaSuffix = currentProject?.active_panorama_view
+                      ? ` · panorama view: ${currentProject.active_panorama_view}`
+                      : '';
+                    return (
+                      <HStack
+                        mb={3} px={3} py={2}
+                        spacing={2}
+                        bg="purple.50"
+                        borderRadius="md"
+                        borderWidth={1}
+                        borderColor="purple.200"
+                        flexWrap="wrap"
+                        fontSize="xs"
+                      >
+                        <Text color="purple.800" fontWeight="bold">Baseline:</Text>
+                        <Badge colorScheme="purple" variant="solid">
+                          {baselineName} — {baselineUnits} unit{baselineUnits === 1 ? '' : 's'}
+                        </Badge>
+                        <Text color="gray.700">
+                          Strategies below are derived from |z| computed against these {baselineUnits} grouping unit{baselineUnits === 1 ? '' : 's'} only{panoramaSuffix}.
+                        </Text>
+                      </HStack>
+                    );
+                  })()}
+                  {/* v4 / Module 14 — secondary "Showing X view + cached for others" hint
+                      retained for context about which other views have cached strategies. */}
+                  {hasDesign && designStrategyResult && aiReport && (() => {
                     const cachedOtherViews = Object.entries(designStrategyResultsByViewId)
                       .filter(([vid, res]) =>
                         vid !== activeViewId
@@ -3352,18 +4339,8 @@ function Reports() {
                         && Object.keys(res.zones || {}).length > 0,
                       )
                       .map(([vid]) => vid);
-                    const friendlyName = (viewId: string): string => {
-                      if (viewId === 'zones') return 'Zones';
-                      if (viewId === 'clusters') return 'Clusters';
-                      if (viewId === 'parent_zones') return 'Parent zones';
-                      if (viewId === 'all_sub_clusters') return 'All sub-clusters';
-                      if (viewId.startsWith('within_zone:')) {
-                        const zid = viewId.slice('within_zone:'.length);
-                        const zname = currentProject?.spatial_zones?.find((z) => z.zone_id === zid)?.zone_name || zid;
-                        return `${zname} (sub-clusters)`;
-                      }
-                      return viewId;
-                    };
+                    // v4.x — use module-level friendlyViewLabel helper now
+                    const friendlyName = (viewId: string) => friendlyViewLabel(viewId, currentProject?.spatial_zones);
                     return (
                       <HStack mb={3} px={2} py={1.5} bg="purple.50" borderRadius="md" borderWidth={1} borderColor="purple.200" spacing={2} flexWrap="wrap">
                         <Text fontSize="xs" color="purple.700">
@@ -3400,34 +4377,70 @@ function Reports() {
                       set the user can't see. Keeping the alert as a
                       pointer so the user knows where to go: the AI Report
                       card on top of the page is the single entry point. */}
-                  {(stage3Failed || !hasDesign) && (
-                    <Alert status={stage3Failed ? 'error' : 'info'} mb={4} borderRadius="md" alignItems="flex-start">
-                      <AlertIcon mt={0.5} />
-                      <Box flex="1">
-                        <Text fontWeight="bold" fontSize="sm">
-                          {stage3Failed ? 'Design strategy generation failed' : 'No design strategies yet'}
-                        </Text>
-                        {stage3Error && <Text fontSize="xs" color="gray.600" mt={1}>{stage3Error}</Text>}
-                        <Text fontSize="xs" color="gray.700" mt={1}>
-                          Strategies are generated together with the AI Report.
-                          Scroll up to the
-                          {' '}<Text as="span" fontWeight="semibold">AI Report</Text>{' '}
-                          card and click
-                          {' '}<Text as="span" fontWeight="semibold">
-                            {hasDesign ? 'Regenerate Strategies + AI Report' : 'Generate Strategies + AI Report'}
-                          </Text>{' '}
-                          — that one button runs both stages.
-                        </Text>
-                      </Box>
-                    </Alert>
-                  )}
+                  {(() => {
+                    // v4.x — Strategies + AI Report are produced by ONE Generate
+                    // button (handleGenerateAiReport runs both stages atomically).
+                    // The UI now enforces the same atomicity on the display side:
+                    // strategies ONLY render when the matching AI Report also
+                    // exists for the active (panorama_view × viewId) combo.
+                    //
+                    // Three failure modes the gate covers:
+                    //   1. Nothing generated yet → "Generate Strategies + AI Report"
+                    //   2. Stage 3 failed in the pipeline → surface the error
+                    //   3. Orphan strategies (strategies persisted but AI Report
+                    //      missing — happens with legacy data, partial regen
+                    //      failures, or panorama-view bucket mismatches). Treat
+                    //      these as "not generated" too so the user can't act on
+                    //      a half-baked state.
+                    if (stage3Failed) {
+                      return (
+                        <Alert status="error" mb={4} borderRadius="md" alignItems="flex-start">
+                          <AlertIcon mt={0.5} />
+                          <Box flex="1">
+                            <Text fontWeight="bold" fontSize="sm">Design strategy generation failed</Text>
+                            {stage3Error && <Text fontSize="xs" color="gray.600" mt={1}>{stage3Error}</Text>}
+                          </Box>
+                        </Alert>
+                      );
+                    }
+                    const orphanStrategies = hasDesign && !aiReport;
+                    if (!hasDesign || orphanStrategies) {
+                      return (
+                        <Alert status="info" mb={4} borderRadius="md" alignItems="flex-start">
+                          <AlertIcon mt={0.5} />
+                          <Box flex="1">
+                            <Text fontWeight="bold" fontSize="sm">
+                              {orphanStrategies
+                                ? 'AI Report not generated for this view'
+                                : 'No design strategies yet'}
+                            </Text>
+                            <Text fontSize="xs" color="gray.700" mt={1}>
+                              {orphanStrategies
+                                ? 'Strategies and AI Report are generated together as one unit. The strategies persisted on this view\'s record without a matching AI Report — likely from a partial generation or a legacy state. '
+                                : 'Strategies are generated together with the AI Report. '}
+                              Scroll up to the
+                              {' '}<Text as="span" fontWeight="semibold">AI Report</Text>{' '}
+                              card and click
+                              {' '}<Text as="span" fontWeight="semibold">
+                                {orphanStrategies || hasDesign
+                                  ? 'Regenerate Strategies + AI Report'
+                                  : 'Generate Strategies + AI Report'}
+                              </Text>{' '}
+                              — that one button runs both stages.
+                            </Text>
+                          </Box>
+                        </Alert>
+                      );
+                    }
+                    return null;
+                  })()}
 
                   {/* v4 / Module 9.3.5 — Source data snapshot folding panel.
                       Surfaces the "what data was this strategy generated against"
                       metadata so reviewers can audit consistency between the
                       strategies, the active grouping mode, and the chart-summary
                       cache. Hidden when no strategies have been generated. */}
-                  {hasDesign && designStrategyResult && (
+                  {hasDesign && designStrategyResult && aiReport && (
                     <Accordion allowToggle mb={3}>
                       <AccordionItem border="1px solid" borderColor="gray.200" borderRadius="md">
                         <AccordionButton bg="gray.50" _hover={{ bg: 'gray.100' }}>
@@ -3494,7 +4507,14 @@ function Reports() {
                     </Accordion>
                   )}
 
-                  {hasDesign && designStrategyResult && <Accordion allowMultiple defaultIndex={[0]}>
+                  {/* v4.x — Strategies content gated on aiReport: only render
+                      when the matching AI Report exists for this view. Without
+                      this, orphan strategies (from partial generation, legacy
+                      data, or panorama bucket mismatches) would still render
+                      cards even though the AI Report card above shows "Not
+                      generated", creating the inconsistency the user flagged
+                      ("AI Report 没生成但 Design Strategies 有内容"). */}
+                  {hasDesign && designStrategyResult && aiReport && <Accordion allowMultiple defaultIndex={[0]}>
                     {Object.entries(designStrategyResult.zones).map(([zoneId, zone]: [string, ZoneDesignOutput]) => (
                       <AccordionItem key={zoneId}>
                         <AccordionButton>
@@ -3687,11 +4707,13 @@ function Reports() {
                       </AccordionItem>
                     ))}
                   </Accordion>}
+                </ErrorBoundary>
                 </TabPanel>
               )}
 
               {/* ── Tab: Indicators ── */}
               <TabPanel px={0}>
+                <ErrorBoundary label="Indicators tab">
                 <VStack spacing={6} align="stretch">
                   {recommendations.length > 0 && (
                     <Card>
@@ -3725,7 +4747,6 @@ function Reports() {
                         <VStack align="stretch" spacing={2}>
                           {indicatorRelationships.map((rel, i) => (
                             <HStack key={i} fontSize="sm" spacing={2}>
-                              <Badge colorScheme="blue">{rel.indicator_a}</Badge>
                               <Badge colorScheme={rel.relationship_type === 'synergistic' ? 'green' : rel.relationship_type === 'inverse' ? 'red' : 'gray'}>{rel.relationship_type}</Badge>
                               <Badge colorScheme="blue">{rel.indicator_b}</Badge>
                               {rel.explanation && <Text fontSize="xs" color="gray.500" noOfLines={1} flex={1}>{rel.explanation}</Text>}
@@ -3762,23 +4783,12 @@ function Reports() {
                     </Card>
                   )}
                 </VStack>
+                </ErrorBoundary>
               </TabPanel>
 
             </TabPanels>
           </Tabs>
         </Box>
-      )}
-
-      {/* Navigation */}
-      {routeProjectId && (
-        <HStack justify="space-between" mt={6}>
-          <Button as={Link} to={`/projects/${routeProjectId}/analysis`} variant="outline">
-            Back: Analysis
-          </Button>
-          <Button as={Link} to={`/projects/${routeProjectId}`} colorScheme="green">
-            Back to Project
-          </Button>
-        </HStack>
       )}
     </PageShell>
   );

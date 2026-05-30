@@ -52,8 +52,14 @@ def _load_mask(mask_path: Optional[str], target_shape) -> Optional[np.ndarray]:
 
 
 
-def calculate_for_layer(image_path: str, mask_path: Optional[str] = None) -> Dict:
+def calculate_for_layer(image_path: str, mask_path: Optional[str] = None, original_photo_path: Optional[str] = None, depth_map_path: Optional[str] = None) -> Dict:
     """Foreground Depth Continuity Index. Coefficient of variation of row-wise CV of depth differences."""
+    # v8.0 — orchestrator now ships the depth map alongside the
+    # semantic map. This indicator reads depth pixel values, not class
+    # labels, so a semantic map gives meaningless results. Prefer the
+    # explicit depth_map_path when present.
+    if depth_map_path:
+        image_path = depth_map_path
     try:
         img = Image.open(image_path)
         arr = np.array(img).astype(np.float64)

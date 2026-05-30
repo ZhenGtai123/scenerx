@@ -5630,7 +5630,7 @@
       "spatial_context": "street-network level",
       "population_scope": "general urban residents",
       "temporal_scope": "Not explicitly authored at L15 ingestion.",
-      "data_acquisition_constraints": "RGB + 语义分割(植被掩膜)",
+      "data_acquisition_constraints": "RGB + semantic segmentation (vegetation mask)",
       "causal_limitations": "Definition-only; no causal claim"
     },
     "linked_records": [
@@ -5677,7 +5677,7 @@
       "spatial_context": "street-network level",
       "population_scope": "general urban residents",
       "temporal_scope": "Not explicitly authored at L15 ingestion.",
-      "data_acquisition_constraints": "RGB(无需分割,基于色彩通道)+ Otsu 自适应阈值",
+      "data_acquisition_constraints": "RGB (no segmentation required, color-channel based) + Otsu adaptive threshold",
       "causal_limitations": "Definition-only; no causal claim"
     },
     "linked_records": [
@@ -5733,7 +5733,7 @@
       "spatial_context": "street-network level",
       "population_scope": "general urban residents",
       "temporal_scope": "Not explicitly authored at L15 ingestion.",
-      "data_acquisition_constraints": "RGB(归一化色彩通道,无需分割)",
+      "data_acquisition_constraints": "RGB (normalized color channels, no segmentation required)",
       "causal_limitations": "Definition-only; no causal claim"
     },
     "linked_records": [
@@ -5832,7 +5832,7 @@
       "spatial_context": "street-network level",
       "population_scope": "general urban residents",
       "temporal_scope": "Not explicitly authored at L15 ingestion.",
-      "data_acquisition_constraints": "RGB + 语义分割(包含 sign/symbol 类)",
+      "data_acquisition_constraints": "RGB + semantic segmentation (including sign/symbol categories)",
       "causal_limitations": "Definition-only; no causal claim"
     },
     "linked_records": [
@@ -5879,7 +5879,7 @@
       "spatial_context": "street-network level",
       "population_scope": "general urban residents",
       "temporal_scope": "Not explicitly authored at L15 ingestion.",
-      "data_acquisition_constraints": "RGB + 语义分割(自然 vs 人工类别清单)",
+      "data_acquisition_constraints": "RGB + semantic segmentation (list of natural vs. artificial categories)",
       "causal_limitations": "Definition-only; no causal claim"
     },
     "linked_records": [
@@ -5931,7 +5931,7 @@
       "spatial_context": "street-network level",
       "population_scope": "general urban residents",
       "temporal_scope": "Not explicitly authored at L15 ingestion.",
-      "data_acquisition_constraints": "RGB + 语义分割(grass/earth/ground/floor)",
+      "data_acquisition_constraints": "RGB + semantic segmentation (grass/earth/ground/floor)",
       "causal_limitations": "Definition-only; no causal claim"
     },
     "linked_records": [
@@ -6030,7 +6030,7 @@
       "spatial_context": "street-network level",
       "population_scope": "general urban residents",
       "temporal_scope": "Not explicitly authored at L15 ingestion.",
-      "data_acquisition_constraints": "RGB + 语义分割(buildings/trees/landmarks)+ 加权和",
+      "data_acquisition_constraints": "RGB + semantic segmentation (buildings/trees/landmarks) + weighted sum",
       "causal_limitations": "Definition-only; no causal claim"
     },
     "linked_records": [
@@ -6077,7 +6077,7 @@
       "spatial_context": "street-network level",
       "population_scope": "general urban residents",
       "temporal_scope": "Not explicitly authored at L15 ingestion.",
-      "data_acquisition_constraints": "RGB + 语义分割(机动车 + motorway 类别)",
+      "data_acquisition_constraints": "RGB + semantic segmentation (motor-vehicle + motorway categories)",
       "causal_limitations": "Definition-only; no causal claim"
     },
     "linked_records": [
@@ -6129,7 +6129,7 @@
       "spatial_context": "street-network level",
       "population_scope": "general urban residents",
       "temporal_scope": "Not explicitly authored at L15 ingestion.",
-      "data_acquisition_constraints": "RGB + 语义分割(多类别像素计数)",
+      "data_acquisition_constraints": "RGB + semantic segmentation (multi-category pixel counts)",
       "causal_limitations": "Definition-only; no causal claim"
     },
     "linked_records": [
@@ -6240,7 +6240,7 @@
       "spatial_context": "street-network level",
       "population_scope": "general urban residents",
       "temporal_scope": "Not explicitly authored at L15 ingestion.",
-      "data_acquisition_constraints": "灰度图 + GLCM 共生矩阵",
+      "data_acquisition_constraints": "Grayscale image + GLCM (Gray-Level Co-occurrence Matrix)",
       "causal_limitations": "Definition-only; no causal claim"
     },
     "linked_records": [
@@ -6287,7 +6287,7 @@
       "spatial_context": "street-network level",
       "population_scope": "general urban residents",
       "temporal_scope": "Not explicitly authored at L15 ingestion.",
-      "data_acquisition_constraints": "灰度图 + Canny 边缘检测",
+      "data_acquisition_constraints": "Grayscale image + Canny edge detection",
       "causal_limitations": "Definition-only; no causal claim"
     },
     "linked_records": [
@@ -6334,7 +6334,7 @@
       "spatial_context": "street-network level",
       "population_scope": "general urban residents",
       "temporal_scope": "Not explicitly authored at L15 ingestion.",
-      "data_acquisition_constraints": "全景图(球面/鱼眼投影)+ 按天顶角分带 + 语义分割",
+      "data_acquisition_constraints": "Panoramic image (spherical / fisheye projection) + banding by zenith angle + semantic segmentation",
       "causal_limitations": "Definition-only; no causal claim"
     },
     "linked_records": [
@@ -6412,7 +6412,7 @@
   {
     "context_id": "CTX_Ma2023_DPT_MEAN_L15",
     "climate": {
-      "koppen_zone_id": "KPN_NA"
+      "koppen_zone_id": "KPN_CFA"
     },
     "urban_form": {
       "lcz_type_id": "LCZ_UNSPECIFIED",
@@ -6423,39 +6423,9 @@
     },
     "applicability": {
       "archetype_id": "ARC_NA",
-      "raw_conditions_text": "Indicator definition-only context; transferability conditions not yet authored from paper specifics.",
-      "study_scope": "Definition record",
-      "spatial_context": "street-network level",
-      "population_scope": "general urban residents",
-      "temporal_scope": "Not explicitly authored at L15 ingestion.",
-      "data_acquisition_constraints": "深度图 D(i,j)(单目深度估计网络输出,如 MiDaS/DPT)",
-      "causal_limitations": "Definition-only; no causal claim"
+      "raw_conditions_text": "Restorative quality of campus environments was assessed using machine-learning regression on street-view images (SVIs). Study site: Lihu campus of Jiangnan University (JNU), Wuxi, Jiangsu Province, China (humid subtropical climate, ~32,219 students, 2166 km² campus area, 1.1 km² building footprint). Method pipeline: (1) extract visual features from SVIs via computer vision (pixel-level, semantic-level, scene-level — including depth-related features such as foreground depth mean DPT_MEAN); (2) collect PRS-11 restorative-quality labels (being-away, coherence, scope, fascination) via online survey; (3) train a gradient-boosted regression tree (GBDT) model predicting restorative quality from SVI features. Sample: 1088 SVIs from campus locations. R² = 0.726 for the prediction model. Adjusted R² = 0.504 for high-level visual features (trees, semantic classes) vs lower for low-level features. Causal scope: cross-sectional correlational; SVIs collected as static observations."
     },
-    "linked_records": [
-      "I_SVCs_Ma2023_DPT_MEAN_L15_model2",
-      "I_SVCs_Ma2023_DPT_MEAN_L15_model3"
-    ],
-    "source": {
-      "citation": "Ma, H., Xu, Q., & Zhang, Y. (2023). High or low? Exploring the restorative effects of visual levels on campus spaces using machine learning and street view imagery. Urban Forestry & Urban Greening, 88, 128087.",
-      "doi": "10.1016/j.ufug.2023.128087"
-    },
-    "context_type": "single_case",
-    "validation": {
-      "linked_evidence_count": 1,
-      "linked_evidence_setting_ids": [
-        "SET_STR"
-      ],
-      "setting_compatibility_rule": "exact_or_parent_child_match",
-      "setting_compatibility_status": "hierarchy_compatible",
-      "exact_match_evidence_ids": [
-        "SVCs_P_Ma2023_DPT_MEAN_L15"
-      ],
-      "compatible_evidence_ids": [
-        "SVCs_P_Ma2023_DPT_MEAN_L15"
-      ],
-      "incompatible_evidence_ids": [],
-      "setting_compatibility_status_general": "compatible"
-    }
+    "linked_records": []
   },
   {
     "context_id": "CTX_Zhao2024_2",
@@ -6479,14 +6449,7 @@
       "data_acquisition_constraints": "Place Pulse 2.0 SVIs used as training/test data; no controlled deployment in real outdoor settings.",
       "causal_limitations": "Descriptive ML benchmark; no causal inference about perception or behaviour is supported."
     },
-    "linked_records": [
-      "I_SVCs_Zhao2024_NEW5_safe",
-      "I_SVCs_Zhao2024_NEW5_beauty",
-      "I_SVCs_Zhao2024_NEW5_boring",
-      "I_SVCs_Zhao2024_NEW5_depressing",
-      "I_SVCs_Zhao2024_NEW5_lively",
-      "I_SVCs_Zhao2024_NEW5_wealthy"
-    ],
+    "linked_records": [],
     "source": {
       "citation": "Zhao, X., Lu, Y., & Lin, G. (2024). An integrated deep learning approach for assessing the visual qualities of built environments utilizing street view images. Engineering Applications of Artificial Intelligence, 130, 107805.",
       "doi": "10.1016/j.engappai.2023.107805"
@@ -6531,10 +6494,7 @@
       "data_acquisition_constraints": "BSV image availability constrained early years; building height and footprint data sourced from municipal records.",
       "causal_limitations": "Descriptive/cross-sectional; no causal inference about perception or behaviour."
     },
-    "linked_records": [
-      "I_SVCs_Qi2024_3_avgmax",
-      "I_SVCs_Qi2024_3_sitemax"
-    ],
+    "linked_records": [],
     "source": {
       "citation": "Qi, L., Hu, Y., Bu, R., Xiong, Z., Li, B., Zhang, C., Liu, H., & Li, C. (2024). Spatial-temporal patterns and influencing factors of the Building Green View Index: A new approach for quantifying 3D urban greenery visibility. Sustainable Cities and Society, 111, 105518.",
       "doi": "10.1016/j.scs.2024.105518"

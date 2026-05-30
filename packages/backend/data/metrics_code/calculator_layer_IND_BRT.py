@@ -64,24 +64,34 @@ except ImportError:
 
 
 # =============================================================================
-# Siamese CNN
+# Siamese CNN — gated by TORCH_AVAILABLE.
+#
+# Defining `class X(nn.Module)` at module top level when `nn` is None
+# raises NameError AT IMPORT TIME, which prevents the metrics orchestrator
+# from loading the calculator at all (the placeholder path becomes dead
+# code in that state). Wrapping the class behind TORCH_AVAILABLE keeps
+# the module importable when torch isn't installed, while the rule-based
+# placeholder branch in `calculate_indicator()` continues to work.
 # =============================================================================
-class SiameseCNN(nn.Module):
-    def __init__(self, num_classes: int = 3):
-        super().__init__()
-        backbone = models.resnet18(pretrained=False)
-        backbone.fc = nn.Identity()
-        self.backbone = backbone
-        self.classifier = nn.Sequential(
-            nn.Linear(512, 128),
-            nn.ReLU(inplace=True),
-            nn.Linear(128, num_classes)
-        )
+if TORCH_AVAILABLE:
+    class SiameseCNN(nn.Module):
+        def __init__(self, num_classes: int = 3):
+            super().__init__()
+            backbone = models.resnet18(pretrained=False)
+            backbone.fc = nn.Identity()
+            self.backbone = backbone
+            self.classifier = nn.Sequential(
+                nn.Linear(512, 128),
+                nn.ReLU(inplace=True),
+                nn.Linear(128, num_classes)
+            )
 
-    def forward(self, x):
-        feat = self.backbone(x)
-        logits = self.classifier(feat)
-        return logits
+        def forward(self, x):
+            feat = self.backbone(x)
+            logits = self.classifier(feat)
+            return logits
+else:
+    SiameseCNN = None  # sentinel — calculate_deep_learning refuses to run
 
 
 # =============================================================================
@@ -286,32 +296,38 @@ if __name__ == "__main__":
 # =============================================================================
 # LAYER-AWARE CALCULATION (auto-added 2026-05-11)
 # =============================================================================
-def calculate_for_layer(semantic_map_path, mask_path=None):
-    """Layer-aware wrapper. If mask_path provided, masks the semantic map
-    to that layer before computing; else computes whole-image.
-    
-    The default strategy: copy semantic map, set non-mask pixels to 0
-    (which won't match any real ADE20K color), then run calculate_indicator.
+def calculate_for_layer(semantic_map_path, mask_path=None, original_photo_path=None):
+    """Layer-aware wrapper (v8.0 — photo-aware).
+
+    Earlier versions called calculate_indicator() on the SEMANTIC MAP after
+    masking it, which made photographic metrics (colour stats, GLCM entropy,
+    fractal dimension, perceived brightness) degenerate to a function of the
+    ADE20K class palette. We now mask the ORIGINAL PHOTO when supplied; if
+    no photo path is given we fall back to the legacy semantic-map behaviour
+    so older callers keep working.
+
+    The masking strategy: copy the photo, set out-of-layer pixels to black
+    (0,0,0), save to a temp file, and call calculate_indicator on that.
     """
     import numpy as np
     from PIL import Image
     import tempfile, os
-    
+
+    src_path = original_photo_path or semantic_map_path
     if not mask_path or not os.path.exists(mask_path):
-        return calculate_indicator(semantic_map_path)
-    
+        return calculate_indicator(src_path)
+
     try:
-        sem_img = Image.open(semantic_map_path).convert('RGB')
-        sem_arr = np.array(sem_img)
+        with Image.open(src_path) as src_img:
+            src_arr = np.array(src_img.convert("RGB"))
         with Image.open(mask_path) as m:
-            m = m.convert('L')
-            if m.size != (sem_arr.shape[1], sem_arr.shape[0]):
-                m = m.resize((sem_arr.shape[1], sem_arr.shape[0]), Image.NEAREST)
+            m = m.convert("L")
+            if m.size != (src_arr.shape[1], src_arr.shape[0]):
+                m = m.resize((src_arr.shape[1], src_arr.shape[0]), Image.NEAREST)
             mask_arr = np.array(m) > 127
-        # Apply mask: non-mask pixels set to black (0,0,0)
-        sem_arr[~mask_arr] = 0
-        with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp:
-            Image.fromarray(sem_arr).save(tmp.name)
+        src_arr[~mask_arr] = 0
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
+            Image.fromarray(src_arr).save(tmp.name)
             tmp_path = tmp.name
         try:
             result = calculate_indicator(tmp_path)
@@ -320,4 +336,5 @@ def calculate_for_layer(semantic_map_path, mask_path=None):
             except: pass
         return result
     except Exception as e:
-        return {'success': False, 'value': None, 'error': f'layer-aware wrapper failed: {e}'}
+        return {"success": False, "value": None,
+                "error": f"layer-aware wrapper failed: {e}"}

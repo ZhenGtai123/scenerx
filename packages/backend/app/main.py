@@ -12,7 +12,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app.core.config import get_settings
 from app.db.project_store import init_project_store, get_project_store
-from app.api.routes import health, config, metrics, projects, vision, indicators, tasks, auth, analysis, encoding
+from app.api.routes import health, config, metrics, projects, vision, indicators, tasks, auth, analysis, encoding, nature_export
 
 # Configure logging
 logging.basicConfig(
@@ -120,6 +120,14 @@ def create_app() -> FastAPI:
         encoding.router,
         prefix="/api/encoding",
         tags=["Encoding Dictionary"],
+    )
+    # Nature-style chart redraw + ZIP export — server-side matplotlib
+    # pipeline that mirrors the paper figures' typography and palette.
+    # The router declares its own /projects/{id}/nature-bundle.zip path.
+    app.include_router(
+        nature_export.router,
+        prefix="/api",
+        tags=["Nature Export"],
     )
 
     # Serve uploaded images as static files

@@ -61,13 +61,122 @@ except ImportError:
 # =============================================================================
 # CALCULATION FUNCTION
 # =============================================================================
-def calculate_indicator(values: Dict[str, float]) -> Dict:
-    use_placeholder = INDICATOR.get('use_placeholder', True)
+# Mapping from TVW's input features (Gi, Si, Di, Ni) to ADE20K class names.
+# Used by `_derive_features_from_semantic_map` so the orchestrator (which
+# only knows about image paths) can drive TVW without first computing four
+# other indicators by hand.
+TVW_FEATURE_CLASSES = {
+    "Gi": ["tree", "grass", "plant;flora;plant;life", "palm;palm;tree", "flower"],
+    "Si": ["sky"],
+    "Di": [
+        "road;route", "sidewalk;pavement", "earth;ground",
+        "floor;flooring", "path",
+    ],
+    "Ni": [
+        "person;individual;someone;somebody;mortal;soul",
+        "person", "pedestrian",
+        "car;auto;automobile;machine;motorcar", "bus",
+        "truck;motortruck", "bicycle;bike;wheel;cycle",
+        "motorbike;motorcycle",
+    ],
+}
 
-    if use_placeholder or not SKLEARN_AVAILABLE:
-        return calculate_placeholder(values)
+
+def _derive_features_from_semantic_map(image_path: str) -> Dict[str, float]:
+    """Compute Gi/Si/Di/Ni from a semantic-map PNG by counting ADE20K class
+    pixels. Returns a dict ready for `calculate_placeholder` / KMeans. If
+    the file or the class-colour map is missing, returns all-zero features
+    so callers see a graceful 'Mixed walkability' classification rather
+    than a crash."""
+    from PIL import Image
+    try:
+        sem = np.array(Image.open(image_path).convert("RGB"))
+    except Exception:
+        return {"Gi": 0.0, "Si": 0.0, "Di": 0.0, "Ni": 0.0}
+    total = sem.shape[0] * sem.shape[1]
+    if total == 0:
+        return {"Gi": 0.0, "Si": 0.0, "Di": 0.0, "Ni": 0.0}
+    sc = globals().get("semantic_colors")
+    if not sc:
+        return {"Gi": 0.0, "Si": 0.0, "Di": 0.0, "Ni": 0.0}
+    out: Dict[str, float] = {}
+    for feat, class_names in TVW_FEATURE_CLASSES.items():
+        cnt = 0
+        for cn in class_names:
+            rgb = sc.get(cn)
+            if not rgb:
+                continue
+            cnt += int(np.sum(np.all(sem == np.array(rgb, dtype=np.uint8), axis=-1)))
+        out[feat] = float(cnt) / float(total)
+    return out
+
+
+def calculate_indicator(values) -> Dict:
+    """v8.0 — dual-mode entry point.
+
+    * If `values` is already a feature dict (`Gi`/`Si`/`Di`/`Ni`), use it
+      directly (the historical API).
+    * If `values` is a string, it's an image_path that the metrics
+      orchestrator passed — we derive the four features from the semantic
+      map at that path before running the clustering. This fixes the
+      "string vs dict" mismatch that was making TVW always raise.
+    """
+    if isinstance(values, str):
+        feat = _derive_features_from_semantic_map(values)
+    elif isinstance(values, dict):
+        feat = {k: float(values.get(k, 0)) for k in ("Gi", "Si", "Di", "Ni")}
     else:
-        return calculate_kmeans(values)
+        return {"success": False, "value": None,
+                "error": f"TVW: unsupported input type {type(values).__name__}"}
+    use_placeholder = INDICATOR.get('use_placeholder', True)
+    if use_placeholder or not SKLEARN_AVAILABLE:
+        return calculate_placeholder(feat)
+    else:
+        return calculate_kmeans(feat)
+
+
+def calculate_for_layer(semantic_map_path, mask_path=None,
+                        original_photo_path=None) -> Dict:
+    """Layer-aware wrapper for TVW.
+
+    We compute Gi/Si/Di/Ni from the semantic map restricted to `mask_path`
+    when given (so 'foreground walkability', 'background walkability'
+    etc. each get their own clustering label).
+    """
+    import os
+    from PIL import Image
+    try:
+        sem = np.array(Image.open(semantic_map_path).convert("RGB"))
+    except Exception as e:
+        return {"success": False, "value": None, "error": str(e)}
+    H, W, _ = sem.shape
+    if mask_path and os.path.exists(mask_path):
+        with Image.open(mask_path) as m:
+            m = m.convert("L")
+            if m.size != (W, H):
+                m = m.resize((W, H), Image.NEAREST)
+            layer_mask = np.array(m) > 127
+        sem[~layer_mask] = 0
+        denom = int(np.sum(layer_mask))
+    else:
+        denom = H * W
+    if denom == 0:
+        return {"success": True, "value": 0, "cluster": 0,
+                "label": "no pixels in layer", "method": "layer-aware"}
+    sc = globals().get("semantic_colors") or {}
+    feat: Dict[str, float] = {}
+    for k, class_names in TVW_FEATURE_CLASSES.items():
+        cnt = 0
+        for cn in class_names:
+            rgb = sc.get(cn)
+            if not rgb:
+                continue
+            cnt += int(np.sum(np.all(sem == np.array(rgb, dtype=np.uint8), axis=-1)))
+        feat[k] = float(cnt) / float(denom)
+    use_placeholder = INDICATOR.get('use_placeholder', True)
+    if use_placeholder or not SKLEARN_AVAILABLE:
+        return calculate_placeholder(feat)
+    return calculate_kmeans(feat)
 
 
 def calculate_placeholder(values: Dict[str, float]) -> Dict:
@@ -118,124 +227,39 @@ def calculate_kmeans(values: Dict[str, float]) -> Dict:
         scaler_path = cfg.get('scaler_path', None)
         feature_order = cfg.get('feature_order', ["Gi", "Si", "Di", "Ni"])
         use_scaler = bool(cfg.get('standardize', True))
-
         if not os.path.exists(model_path):
             return {
                 'success': False,
-                'error': f'Model file not found: {model_path}',
                 'value': None,
-                'method': 'kmeans',
-                'fallback': 'Run with use_placeholder=True or provide kmeans model file'
+                'error': f'KMeans model file not found at {model_path}',
+                'fallback_hint': 'Set use_placeholder=True in INDICATOR or provide a trained model',
             }
 
-        with open(model_path, "rb") as f:
-            kmeans = pickle.load(f)
-
-        x = np.array([[float(values.get(k, 0)) for k in feature_order]], dtype=float)
-
+        with open(model_path, 'rb') as fh:
+            kmeans = pickle.load(fh)
         scaler = None
         if use_scaler and scaler_path and os.path.exists(scaler_path):
-            with open(scaler_path, "rb") as f:
-                scaler = pickle.load(f)
-            x_in = scaler.transform(x)
-        else:
-            x_in = x
+            with open(scaler_path, 'rb') as fh:
+                scaler = pickle.load(fh)
 
-        cluster = int(kmeans.predict(x_in)[0])
-
-        if hasattr(kmeans, "transform"):
-            dists = kmeans.transform(x_in).reshape(-1).tolist()
-            dists = [round(float(d), 6) for d in dists]
-        else:
-            dists = None
-
+        x = np.array([float(values.get(k, 0)) for k in feature_order],
+                     dtype=float).reshape(1, -1)
+        if scaler is not None:
+            x = scaler.transform(x)
+        cluster = int(kmeans.predict(x)[0])
         return {
             'success': True,
             'value': cluster,
             'cluster': cluster,
             'method': 'kmeans',
-            'features_used': {k: round(float(values.get(k, 0)), 3) for k in feature_order},
-            'distance_to_centroids': dists
+            'features_used': {k: round(float(values.get(k, 0)), 3)
+                              for k in feature_order},
         }
 
     except Exception as e:
         return {
             'success': False,
-            'error': str(e),
             'value': None,
-            'method': 'kmeans'
+            'error': str(e),
+            'method': 'kmeans',
         }
-
-
-# =============================================================================
-# HELPER FUNCTIONS
-# =============================================================================
-def interpret_tvw(cluster: int) -> str:
-    mapping = {
-        0: "Mixed/Transitional walkability type",
-        1: "High walkability type",
-        2: "Low walkability type",
-        3: "Crowded but active walkability type",
-        4: "Open but low greenery walkability type"
-    }
-    return mapping.get(int(cluster), "Unknown walkability type")
-
-
-# =============================================================================
-# TEST CODE
-# =============================================================================
-if __name__ == "__main__":
-    print("\nTesting Type of Visual Walkability calculator...")
-
-    tests = [
-        ("High walkability", {"Gi": 0.7, "Si": 0.6, "Di": 0.8, "Ni": 0.2}),
-        ("Low walkability", {"Gi": 0.2, "Si": 0.2, "Di": 0.5, "Ni": 0.8}),
-        ("Mixed", {"Gi": 0.4, "Si": 0.5, "Di": 0.3, "Ni": 0.4})
-    ]
-
-    for name, vals in tests:
-        result = calculate_indicator(vals)
-        print(f"\n{name}:")
-        print(f" Cluster: {result.get('value')}")
-        print(f" Method: {result.get('method')}")
-        print(f" Interpretation: {interpret_tvw(int(result.get('value') or 0))}")
-
-
-# =============================================================================
-# LAYER-AWARE CALCULATION (auto-added 2026-05-11)
-# =============================================================================
-def calculate_for_layer(semantic_map_path, mask_path=None):
-    """Layer-aware wrapper. If mask_path provided, masks the semantic map
-    to that layer before computing; else computes whole-image.
-    
-    The default strategy: copy semantic map, set non-mask pixels to 0
-    (which won't match any real ADE20K color), then run calculate_indicator.
-    """
-    import numpy as np
-    from PIL import Image
-    import tempfile, os
-    
-    if not mask_path or not os.path.exists(mask_path):
-        return calculate_indicator(semantic_map_path)
-    
-    try:
-        sem_img = Image.open(semantic_map_path).convert('RGB')
-        sem_arr = np.array(sem_img)
-        with Image.open(mask_path) as m:
-            m = m.convert('L')
-            if m.size != (sem_arr.shape[1], sem_arr.shape[0]):
-                m = m.resize((sem_arr.shape[1], sem_arr.shape[0]), Image.NEAREST)
-            mask_arr = np.array(m) > 127
-        # Apply mask: non-mask pixels set to black (0,0,0)
-        sem_arr[~mask_arr] = 0
-        with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp:
-            Image.fromarray(sem_arr).save(tmp.name)
-            tmp_path = tmp.name
-        try:
-            result = calculate_indicator(tmp_path)
-        finally:
-            try: os.unlink(tmp_path)
-            except: pass
-        return result
-    except Exception as e:
-        return {'success': False, 'value': None, 'error': f'layer-aware wrapper failed: {e}'}

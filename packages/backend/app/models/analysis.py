@@ -191,18 +191,32 @@ class ClusteringResult(BaseModel):
     labels_smoothed: list[int] = Field(default_factory=list)  # labels after KNN smoothing
     # Ward hierarchical clustering linkage matrix (for dendrogram). Rows: [id1, id2, dist, count].
     dendrogram_linkage: list[list[float]] = Field(default_factory=list)
-    # ── HDBSCAN-specific fields (v6.1) ──
-    # Per-cluster persistence (HDBSCAN stability under density variation).
+    # ── Legacy density-clustering fields (v6.1, deprecated) ──
+    # No longer populated since v6.2 (GMM-BIC primary); retained as empty
+    # defaults so old ClusteringResult records still deserialize.
+    # Per-cluster persistence (legacy density-stability score).
     # Higher = more robust cluster. Map: cluster_id (str) → score.
     cluster_persistence: dict[str, float] = Field(default_factory=dict)
     # Per-point silhouette coefficient (against final labels, noise → None).
     silhouette_per_point: list[Optional[float]] = Field(default_factory=list)
-    # Number of points HDBSCAN labelled as noise (-1) before reassignment.
+    # Number of points formerly labelled as noise (-1) before reassignment (legacy).
     noise_count: int = 0
     noise_point_ids: list[str] = Field(default_factory=list)
-    # HDBSCAN condensed-tree edges for D3 visualization.
+    # Legacy condensed-tree edges (former density-clustering tree visual; unused).
     # Each edge: {parent: int, child: int, lambda_val: float, child_size: int}.
     condensed_tree: list[dict] = Field(default_factory=list)
+    # ── v6.2 — cluster-validity diagnostics (tendency · gap · stability) ──
+    # Hopkins clustering-tendency on the standardised feature matrix:
+    # ~0.5 = no structure (uniform cloud), → 1.0 = strong cluster structure.
+    hopkins_statistic: Optional[float] = None
+    # Tibshirani gap statistic per k: [{k, gap, s_k, is_selected}].
+    # Independent K-validity criterion; does not override the chosen k.
+    gap_statistic: list[dict] = Field(default_factory=list)
+    # Hennig bootstrap stability: cluster_id (str) → mean Jaccard over
+    # bootstrap resamples. ≥0.85 highly stable, 0.75-0.85 stable,
+    # 0.60-0.75 a pattern, <0.60 unstable / dissolved.
+    cluster_stability: dict[str, float] = Field(default_factory=dict)
+    cluster_stability_method: str = ""
 
 
 class ZoneAnalysisResult(BaseModel):
@@ -416,6 +430,15 @@ class ProjectPipelineRequest(BaseModel):
     use_llm: bool = False
     max_ioms_per_query: int = Field(default=6, ge=1, le=20)
     max_strategies_per_zone: int = Field(default=5, ge=1, le=10)
+    # v4.x — Panorama per-view scoping. When set to one of
+    # ("left", "front", "right"), the pipeline aliases each image's
+    # `{view}_semantic_map` / `{view}_depth_map` keys back to the standard
+    # `semantic_map` / `depth_map` slots that the existing calculators
+    # consume, then persists results into `project.panorama_view_results
+    # [panorama_view]` AND mirrors them into the legacy top-level slots
+    # (with `project.active_panorama_view` updated to match). When left as
+    # None, the legacy single-view path runs unchanged.
+    panorama_view: Optional[str] = None
 
 
 class ProjectPipelineProgress(BaseModel):
@@ -444,6 +467,4 @@ class ProjectPipelineResult(BaseModel):
     calculations_cached: int = 0
     zone_statistics_count: int = 0
     skipped_images: list[SkippedImage] = Field(default_factory=list)
-    zone_analysis: Optional[ZoneAnalysisResult] = None
-    design_strategies: Optional[DesignStrategyResult] = None
-    steps: list[ProjectPipelineProgress] = Field(default_factory=list)
+  

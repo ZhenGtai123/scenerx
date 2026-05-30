@@ -45,6 +45,19 @@ print(f" Alpha: {INDICATOR.get('alpha', -1.0)}")
 # CALCULATION FUNCTION
 # =============================================================================
 def calculate_indicator(Gi: List[float], Li: List[float], Di: List[float], alpha: float = None) -> Dict:
+    # v8.0 — graceful skip when called per-image. This is a composite/
+    # aggregator indicator that needs other-indicators or multi-location
+    # input, not a single image. The orchestrator iterates per-image with
+    # image_path strings; without this guard we'd raise AttributeError on
+    # the first .get() call. Downstream composite callers that pass the
+    # correct dict input still execute the formula below.
+    if isinstance(Gi, str):
+        return {
+            "success": False,
+            "value": None,
+            "error": "IND_VSG_BLK: composite indicator — call after per-image metrics are computed; cannot evaluate from a single image_path",
+            "skip_reason": "composite_or_aggregator",
+        }
     try:
         a = float(alpha) if alpha is not None else float(INDICATOR.get('alpha', -1.0))
 

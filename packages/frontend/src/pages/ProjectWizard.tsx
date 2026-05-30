@@ -43,8 +43,9 @@ import api from '../api';
 import useAppToast from '../hooks/useAppToast';
 import PageShell from '../components/PageShell';
 import EncodingInfoPopover from '../components/EncodingInfoPopover';
+import { ErrorBoundary } from '../components/ErrorBoundary';
 import { useEncodingSections } from '../hooks/useApi';
-import type { EncodingEntry } from '../types';
+import type { EncodingEntry, SpatialRelation } from '../types';
 
 // ============ Constants ============
 
@@ -119,6 +120,21 @@ interface SpatialZone {
   description?: string;
 }
 
+// Canonical zone-to-zone relation vocabulary.
+// Drawn from landscape-architecture spatial-syntax conventions and used
+// downstream by the analysis service to constrain cross-zone interpretation:
+//   - adjacent / connected / nearby  : permit cross-zone correlation claims
+//   - contains                       : hierarchical (parent zone aggregates child)
+//   - distant                        : explicit exclusion marker against
+//                                       spurious spatial-pattern claims
+const RELATION_TYPES: { id: string; name: string; defaultDirection: 'single' | 'bidirectional' }[] = [
+  { id: 'adjacent',  name: 'Adjacent (share boundary)',          defaultDirection: 'bidirectional' },
+  { id: 'nearby',    name: 'Nearby (within visual range)',       defaultDirection: 'bidirectional' },
+  { id: 'connected', name: 'Connected (path / circulation)',     defaultDirection: 'bidirectional' },
+  { id: 'contains',  name: 'Contains (hierarchical)',            defaultDirection: 'single' },
+  { id: 'distant',   name: 'Distant (no direct interaction)',    defaultDirection: 'bidirectional' },
+];
+
 // ============ Component ============
 
 function ProjectWizard() {
@@ -164,6 +180,10 @@ function ProjectWizard() {
   const [zones, setZones] = useState<SpatialZone[]>([]);
   const [zoneTypes] = useState(DEFAULT_ZONE_TYPES);
 
+  // Zone-to-zone relations (graph edges between spatial_zones).
+  // Empty array = zones treated as independent by downstream analysis.
+  const [relations, setRelations] = useState<SpatialRelation[]>([]);
+
   // Saving
   const [saving, setSaving] = useState(false);
 
@@ -208,6 +228,7 @@ function ProjectWizard() {
             description: z.description || '',
           }));
           setZones(loadedZones);
+          setRelations(project.spatial_relations || []);
         })
         .catch((error) => {
           console.error('Failed to load project:', error);
@@ -250,6 +271,42 @@ function ProjectWizard() {
 
     updateZone(zoneId, { types: newTypes });
   };
+
+  // ============ Relation Functions ============
+
+  const addRelation = () => {
+    if (zones.length < 2) {
+      toast({ title: 'Add at least two zones before declaring a relation', status: 'info' });
+      return;
+    }
+    setRelations([
+      ...relations,
+      {
+        from_zone: zones[0].id,
+        to_zone: zones[1].id,
+        relation_type: 'adjacent',
+        direction: 'bidirectional',
+      },
+    ]);
+  };
+
+  const updateRelation = (index: number, updates: Partial<SpatialRelation>) => {
+    setRelations(relations.map((r, i) => (i === index ? { ...r, ...updates } : r)));
+  };
+
+  const removeRelation = (index: number) => {
+    setRelations(prev => prev.filter((_, i) => i !== index));
+  };
+
+  // When a zone is removed, drop any relations that referenced it so we
+  // never persist dangling from_zone / to_zone ids to the API.
+  useEffect(() => {
+    const validIds = new Set(zones.map(z => z.id));
+    setRelations(prev => {
+      const filtered = prev.filter(r => validIds.has(r.from_zone) && validIds.has(r.to_zone));
+      return filtered.length === prev.length ? prev : filtered;
+    });
+  }, [zones]);
 
   // ============ Save Function ============
 
@@ -295,6 +352,9 @@ function ProjectWizard() {
           status: z.status,
           description: z.description,
         })),
+        // Drop self-loops at save time; UI surfaces an inline error but
+        // we never want them to reach the API.
+        spatial_relations: relations.filter(r => r.from_zone !== r.to_zone),
       };
 
       let savedProjectId: string;
@@ -621,6 +681,12 @@ function ProjectWizard() {
         </Card>
 
         {/* Section 4: Spatial Zones */}
+        {/* v4.x — ErrorBoundary around the zone editor: this is the most
+            crash-prone section in ProjectWizard (add/remove zones triggers
+            list mutations + form re-renders, area/zone-type tag manipulation
+            can produce undefined intermediate states). A crash here doesn't
+            take out the relations editor below or the form sections above. */}
+        <ErrorBoundary label="Spatial Zones editor">
         <Card>
           <CardHeader>
             <HStack justify="space-between">
@@ -728,6 +794,138 @@ function ProjectWizard() {
             )}
           </CardBody>
         </Card>
+        </ErrorBoundary>
+
+        {/* Section 4b: Zone-to-Zone Relations.
+            Declares the spatial graph between zones so downstream analysis
+            (within-zone clustering, cross-zone correlation claims) can be
+            conditioned on the declared edges rather than treating every
+            zone pair as independent. Empty = independent (legacy behaviour). */}
+        <ErrorBoundary label="Zone Relations editor">
+        <Card>
+          <CardHeader>
+            <HStack justify="space-between">
+              <SectionTitle
+                icon={Map}
+                title="Zone-to-Zone Relations"
+                subtitle="Declare how zones relate; constrains cross-zone interpretation downstream"
+              />
+              <Button
+                colorScheme="blue"
+                size="sm"
+                onClick={addRelation}
+                leftIcon={<Plus size={14} />}
+                isDisabled={zones.length < 2}
+              >
+                Add Relation
+              </Button>
+            </HStack>
+          </CardHeader>
+          <CardBody>
+            {zones.length < 2 ? (
+              <Box textAlign="center" py={4} color="gray.500">
+                <Text fontSize="sm">Define at least two zones above before declaring relations.</Text>
+              </Box>
+            ) : relations.length === 0 ? (
+              <Box textAlign="center" py={4} color="gray.500">
+                <Text fontSize="sm">
+                  No relations declared yet — downstream cross-zone analysis will treat zones as independent.
+                </Text>
+              </Box>
+            ) : (
+              <VStack spacing={3} align="stretch">
+                {relations.map((rel, i) => {
+                  const isSelfLoop = rel.from_zone === rel.to_zone;
+                  return (
+                    <Box
+                      key={`${rel.from_zone}-${rel.to_zone}-${i}`}
+                      p={3}
+                      borderWidth={1}
+                      borderRadius="md"
+                      borderColor={isSelfLoop ? 'red.300' : 'gray.200'}
+                      bg="gray.50"
+                    >
+                      <SimpleGrid columns={{ base: 1, md: 5 }} spacing={3} alignItems="end">
+                        <FormControl>
+                          <FormLabel fontSize="xs">From Zone</FormLabel>
+                          <Select
+                            size="sm"
+                            value={rel.from_zone}
+                            onChange={(e) => updateRelation(i, { from_zone: e.target.value })}
+                          >
+                            {zones.map(z => (
+                              <option key={z.id} value={z.id}>{z.name || z.id}</option>
+                            ))}
+                          </Select>
+                        </FormControl>
+                        <FormControl>
+                          <FormLabel fontSize="xs">Relation</FormLabel>
+                          <Select
+                            size="sm"
+                            value={rel.relation_type}
+                            onChange={(e) => {
+                              const next = RELATION_TYPES.find(t => t.id === e.target.value);
+                              updateRelation(i, {
+                                relation_type: e.target.value,
+                                direction: next?.defaultDirection ?? 'bidirectional',
+                              });
+                            }}
+                          >
+                            {RELATION_TYPES.map(t => (
+                              <option key={t.id} value={t.id}>{t.name}</option>
+                            ))}
+                          </Select>
+                        </FormControl>
+                        <FormControl>
+                          <FormLabel fontSize="xs">To Zone</FormLabel>
+                          <Select
+                            size="sm"
+                            value={rel.to_zone}
+                            onChange={(e) => updateRelation(i, { to_zone: e.target.value })}
+                          >
+                            {zones.map(z => (
+                              <option key={z.id} value={z.id}>{z.name || z.id}</option>
+                            ))}
+                          </Select>
+                        </FormControl>
+                        <FormControl>
+                          <FormLabel fontSize="xs">Direction</FormLabel>
+                          <Select
+                            size="sm"
+                            value={rel.direction || 'single'}
+                            onChange={(e) => updateRelation(i, { direction: e.target.value })}
+                          >
+                            <option value="single">Single (A → B)</option>
+                            <option value="bidirectional">Bidirectional (A ↔ B)</option>
+                          </Select>
+                        </FormControl>
+                        <Button
+                          size="sm"
+                          colorScheme="red"
+                          variant="ghost"
+                          onClick={() => removeRelation(i)}
+                        >
+                          Remove
+                        </Button>
+                      </SimpleGrid>
+                      {isSelfLoop && (
+                        <Text fontSize="xs" color="red.600" mt={2}>
+                          A zone cannot relate to itself — pick a different To Zone (this row will be dropped on save).
+                        </Text>
+                      )}
+                    </Box>
+                  );
+                })}
+                <Text fontSize="2xs" color="gray.600">
+                  <strong>adjacent / nearby / connected</strong> permit cross-zone correlation in within-zone
+                  clustering reports. <strong>contains</strong> marks a parent-child hierarchy.
+                  <strong> distant</strong> is an explicit exclusion against spurious spatial-pattern claims.
+                </Text>
+              </VStack>
+            )}
+          </CardBody>
+        </Card>
+        </ErrorBoundary>
 
 
         {/* v4 / Module 11.3.3 — soft-required-fields warning. The 5 listed

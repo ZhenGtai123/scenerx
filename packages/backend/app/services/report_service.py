@@ -114,7 +114,8 @@ Reports page). Available refCodes:
   B1 Zone Ranking · B2 Zone × Indicator · B3 Zone Profile Radar · B4 Zone Deviation Map
   C1 Indicator Distribution · C2 Per-Indicator Drill-Down · C3 Within-Zone Image Distribution · C4 Indicator Value Map
   D1 Global Stats · D2 Zone × Indicator Mean Matrix · D3 Indicator Correlation
-  E1 Cluster Centroid Heatmap · E2 Per-Point Silhouette Plot · E3 HDBSCAN Condensed Tree · E4 Cluster Spatial Map
+  E1 Cluster Centroid Heatmap · E2 Per-Point Silhouette Plot · E3 Silhouette Score Curve · E4 Ward Hierarchical Clustering
+  E5 Cluster Spatial Smoothing · E6 Cluster Radar Profiles · E7 Cluster Size Distribution
 (E-codes are only available when clustering has been run; cite them only
 in cluster-derived reports.)
 You MAY NOT invent refCodes outside this list. Each claim MUST be traceable
@@ -175,16 +176,53 @@ For each unit, include in the report:
 4.X.1 Integrated diagnosis (from the unit's `diagnosis` field; expand into
       a paragraph that anchors to the actual chart numbers, not to invented
       observations).
-4.X.2 Strategy entry. For every strategy in `stage3_data[unit].design_strategies`,
-      surface its: target_indicators, 4-axis signature, pathway,
-      expected_effects, transferability_note, supporting_ioms,
-      implementation_guidance.
-      v4 / Module 10.3.3 — every strategy MUST include a line:
-      "Diagnosed by: <2-4 chart refCodes>" e.g. "Diagnosed by: B2, C2, C3"
-      (or "C1, C3, D1" in single-zone mode, or "E1, E2, C2" in cluster
-      mode). The refCodes must come from Section 3's reference list and
-      MUST cite charts that were actually rendered for this project's mode
-      (no B-codes in single-zone, no E-codes when clustering wasn't run).
+4.X.2 Strategy entries. For every strategy in
+      `stage3_data[unit].design_strategies`, render the entry below in
+      the **EXACT same skeleton** — same field order, same labels, same
+      number of bullets — regardless of project mode (single-zone vs.
+      cluster vs. multi-zone). The reader should be able to scroll
+      Section 4 and read every strategy at the same depth of detail;
+      cluster-mode reports must NOT be terser than single-zone reports.
+      Granularity target = the platform's Design Strategies tab card,
+      which surfaces all of these fields on screen.
+
+      v4.6 / Module 10.3.4 — MANDATORY per-strategy skeleton (verbatim
+      labels, in this order; if a field is missing in `stage3_data`,
+      write "—" or quote the missing field so the reader sees the gap
+      explicitly):
+
+      **Strategy N (Priority N · Grade <confidence> · <target_indicators[0]>) — <strategy_name>**
+
+      - *Location:* <spatial_location>  (e.g. Foreground / Middleground /
+        Background / Full layer)
+      - *Intervention:* <intervention.object> × <intervention.variable> →
+        <intervention.action>. <one-sentence intervention.description>.
+      - *Signature:* `<signatures[0].operation>` × `<signatures[0].semantic>`
+        × `<signatures[0].spatial>` × `<signatures[0].morphological>`
+        (cite up to 3 signatures when present, comma-separated).
+      - *Pathway:* one paragraph paraphrasing `pathway` — what mechanism
+        actually delivers the indicator change, in plain language.
+      - *Expected effects:* bullet list, one bullet per entry in
+        `expected_effects`, formatted as
+          `<indicator> <direction> <magnitude> (<note>)`.
+      - *Tradeoffs:* paraphrase `potential_tradeoffs` (or
+        `transferability_note` if tradeoffs are empty). State "—" only
+        when both are empty.
+      - *Implementation guidance:* paraphrase `implementation_guidance`
+        in 1-3 sentences; do not pad with generic best-practice prose.
+      - *Supporting IOMs:* comma-separated list from `supporting_ioms`
+        (these are the IOM record IDs that ground the strategy in the
+        knowledge base; cite the first 5 if there are more).
+      - *Diagnosed by:* <2-4 chart refCodes>. e.g. "B2, C2, C3" in
+        multi-zone mode, "C1, C3, D1" in single-zone mode,
+        "E1, E2, C2" in cluster mode. RefCodes must come from
+        Section 3's reference list AND be valid for this project's view
+        (no B-codes in single-zone, no E-codes when clustering wasn't run).
+
+      Do NOT collapse this skeleton into a flat one-line paragraph for
+      cluster-mode units. The Strategies tab on the Reports page renders
+      every cluster's strategies at this granularity; the report's
+      Section 4 must mirror that 1:1.
 4.X.3 Intra-unit synergies (from how the strategies in this unit interact
       — derive from the strategies' target_indicators and pathways; do not
       invent unrelated synergies).
@@ -290,13 +328,13 @@ spatial zone in the project setup or run KMeans archetype clustering
 9. **Chart-grounding (CRITICAL)** — Every "Diagnosed by:" line in
    Section 4, and every monitoring entry in Section 5.3, MUST cite chart
    refCodes that are actually rendered in the user's current view:
-     • single-zone, no clustering   → only A1, A2, C1, C3, C4, D1
+     • single-zone, no clustering   → only A1, A2, C1–C4, D1
      • multi-zone, no clustering    → A1–A2, B1–B4, C1–C4, D1–D3
      • single-zone + clustering     → A1–A2, B1–B4 (cluster-derived),
-                                       C1–C4, D1–D3, E1–E4
+                                       C1–C4, D1–D3, E1–E7
      • multi-zone + within-zone     → A1–A2, B1–B4 (sub-zone-derived),
-                                       C1–C4, D1–D3, E1–E4
-   Do not cite refCodes the user can't see. Cluster-only charts (E1–E4)
+                                       C1–C4, D1–D3, E1–E7
+   Do not cite refCodes the user can't see. Cluster-only charts (E1–E7)
    may only be cited when `data_quality_flags.zone_source == 'cluster'`.
 10. **Enumerate every cluster — no shortcuts (CRITICAL)** — The user-facing
    Strategies tab on the Reports page renders one accordion entry per
@@ -307,8 +345,22 @@ spatial zone in the project setup or run KMeans archetype clustering
    into 8 subsections (4.1, 4.2, … 4.8). Do not collapse, summarize, or
    "follow same as above" any unit. The user comparing the report against
    the Strategies tab will catch any missing units immediately. Length
-   budget: target ~120–200 words per strategy entry; do not skip entries
-   to stay under a self-imposed length cap.
+   budget: target ~180–260 words per strategy entry (the
+   Location / Intervention / Signature / Pathway / Expected effects /
+   Tradeoffs / Implementation / Supporting IOMs / Diagnosed-by skeleton
+   is dense — keeping every bullet present is more important than
+   keeping the entry short).
+11. **Uniform Strategy skeleton (CRITICAL)** — The 9-bullet skeleton in
+   4.X.2 above is the SAME for every project mode and every strategy.
+   In particular: do NOT emit a richer block for single-zone single-
+   spatial-unit projects and a leaner block for cluster-mode projects.
+   If a stage3 field is empty, print "—" so the reader can see the gap;
+   never silently omit a bullet. The skeleton's bullet order, labels,
+   and italic emphasis are part of the contract — the report is read
+   side-by-side with the Strategies tab, so the labels must match
+   ("Location", "Intervention", "Signature", "Pathway", "Expected
+   effects", "Tradeoffs", "Implementation guidance", "Supporting IOMs",
+   "Diagnosed by").
 """
 
 
@@ -333,6 +385,13 @@ class ReportService:
         # prompt can surface it as a caveat in Section 6 instead of returning
         # generic boilerplate.
         za = request.zone_analysis
+        # v6.2 — honor the requested view. The zone-view payload can carry
+        # segment_diagnostics (clustering persists the archetypes at the top
+        # level of zone_analysis_result for chart rendering). Drop it unless
+        # this request is for a cluster-derived view so the Stage 2 prompt
+        # summary lists the user's real zones, not the cluster archetypes.
+        if request.grouping_mode != "clusters" and za.segment_diagnostics:
+            za = za.model_copy(update={"segment_diagnostics": None})
         is_image_level = (za.analysis_mode or "zone_level") == "image_level"
         all_zero_deviation = bool(
             za.zone_diagnostics
@@ -345,7 +404,7 @@ class ReportService:
         )
         stage1_data = self._prepare_stage1(request.stage1_recommendations)
         stage2_data = self._prepare_stage2(
-            request.zone_analysis, request.stage1_recommendations
+            za, request.stage1_recommendations
         )
         stage3_data = self._prepare_stage3(request.design_strategies)
         encoding_ref = json.dumps(
@@ -846,16 +905,32 @@ class ReportService:
                         for s in m.signatures[:3]
                     ],
                 })
-            # All strategies
+            # All strategies. EVERY field the Design Strategies tab shows
+            # on screen is included here so Section 4 of the report can
+            # match the tab's granularity 1:1 — same Location / Intervention
+            # (Object × Variable × Action) / Signatures / Pathway / Expected
+            # Effects / Tradeoffs / Implementation Guidance / Supporting IOMs.
             for s in zone.design_strategies:
                 unit_data["design_strategies"].append({
                     "priority": s.priority,
                     "strategy_name": s.strategy_name,
                     "target_indicators": s.target_indicators,
+                    # Location + Intervention — the platform Design Strategies
+                    # card surfaces these explicitly (Location: Background /
+                    # Object: Built Structure / Variable: Shape / Action: Modify).
+                    "spatial_location": s.spatial_location,
+                    "intervention": s.intervention,
                     "signatures": s.signatures[:3],
                     "pathway": s.pathway,
+                    # Grade / confidence chip ("GRADE A - STRONG" in the UI).
                     "confidence": s.confidence,
+                    # Tradeoffs (rendered as a yellow caution row in the UI)
+                    # and transferability — both must flow into the report
+                    # so a reviewer reading the prose sees the same caveats
+                    # that someone clicking through the Strategies tab does.
+                    "potential_tradeoffs": s.potential_tradeoffs,
                     "transferability_note": s.transferability_note,
+                    "boundary_effects": s.boundary_effects,
                     "expected_effects": s.expected_effects,
                     "supporting_ioms": s.supporting_ioms,
                     "implementation_guidance": s.implementation_guidance,

@@ -81,7 +81,13 @@ export function ModeAlert({
   const isDegenerateN2 = showDegenerateNTwoWarning && zoneCount > 0 && zoneCount <= 2;
   const shouldRender = analysisMode === 'image_level' || isDegenerateN2;
   if (!shouldRender) return null;
-  if (dismissed) return null;
+  // v4.x — Dismiss now only hides the warning TEXT (title + body + sub-body).
+  // The action buttons (Run Within-Zone Clustering, Add Another Zone) stay
+  // visible as a compact button bar. Before this change, dismissing the
+  // alert removed the entire component including the action buttons, leaving
+  // users with no way to add zones or run clustering without clearing
+  // sessionStorage. The "Dismiss" / "Continue with Image-Level" button is
+  // still useful — it collapses the wordy warning to just the actions.
 
   const handleDismiss = () => {
     if (sessionKey) sessionStorage.setItem(sessionKey, '1');
@@ -98,9 +104,12 @@ export function ModeAlert({
   // CTA buttons across all three branches so the UX feels uniform.
   // unit-noun depends on whether the grouping units are user-defined zones
   // or cluster-derived sub-units.
-  const unitNoun = isDegenerateN2
-    ? (isClusterDerived ? 'cluster' : 'zone')
-    : 'zone';
+  // v4.x - prefer 'cluster' for any cluster-derived view (within-zone drill /
+  // sub-clusters), regardless of degeneracy. Previously the non-degenerate
+  // branch always returned 'zone', so on a cluster-derived view the
+  // image-level fallback banner said "zones" even when the grouping units
+  // were sub-clusters.
+  const unitNoun = isClusterDerived ? 'cluster' : 'zone';
   const unitNounPlural = `${unitNoun}s`;
 
   // Numeric phrasing for the K=1 vs K=2 split — singular for K=1, "Only N"
@@ -113,7 +122,7 @@ export function ModeAlert({
   const title = isDegenerateN2
     ? `Cross-${unitNoun} Charts Hidden — Only ${countLabel}`
     : isClusterDerived
-      ? 'Sub-Zone Mode'
+      ? 'Cluster Mode (Image-Level Fallback)'
       : 'Single-Zone (Image-Level) Mode';
 
   const body = isDegenerateN2
@@ -136,8 +145,8 @@ export function ModeAlert({
       </>
     )
     : isClusterDerived
-      ? `Falling back to image-level statistics on ${imageCount} GPS points (sub-zones derived from clustering, treated as zones).`
-      : `Cross-zone z-scores require ≥ 2 zones. With only ${zoneCount} zone${
+      ? `Falling back to image-level statistics on ${imageCount} GPS points (clusters derived from within-zone clustering, treated as grouping units).`
+      : `Cross-${unitNoun} z-scores require ≥ 2 ${unitNounPlural}. With only ${zoneCount} ${unitNoun}${
           zoneCount === 1 ? '' : 's'
         }, falling back to image-level statistics on ${imageCount} GPS points.`;
 
@@ -169,6 +178,55 @@ export function ModeAlert({
   const continueLabel = isDegenerateN2
     ? 'Dismiss'
     : 'Continue with Image-Level';
+
+  // v4.x — When dismissed, render a COMPACT bar with just the action
+  // buttons (Run Within-Zone Clustering, Add Another Zone). No warning
+  // text, no close button. This keeps the affordances visible always so
+  // users can act on the degeneracy whenever they want, without having to
+  // clear sessionStorage to bring back the buttons.
+  if (dismissed) {
+    return (
+      <HStack
+        mb={4}
+        px={3}
+        py={2}
+        borderRadius="md"
+        borderWidth={1}
+        borderColor="gray.200"
+        bg="gray.50"
+        spacing={2}
+        flexWrap="wrap"
+      >
+        <Text fontSize="xs" color="gray.600" mr={2}>
+          {isDegenerateN2 ? `N=${zoneCount} ${unitNounPlural} — options:` : 'Image-level mode — options:'}
+        </Text>
+        {!hideClusteringButton && (
+          <Button
+            size="xs"
+            colorScheme="teal"
+            variant="outline"
+            onClick={onRunClustering}
+            isLoading={isClusteringRunning}
+            isDisabled={!canRunClustering}
+            loadingText="Clustering..."
+          >
+            {clusterCtaLabel}
+          </Button>
+        )}
+        {!isWithinZoneDrillDegenerate && (
+          <Button
+            size="xs"
+            colorScheme="blue"
+            variant="outline"
+            onClick={handleAddZone}
+            isDisabled={!projectId}
+          >
+            Add Another Zone
+          </Button>
+        )}
+      </HStack>
+    );
+  }
 
   return (
     <Alert status="warning" mb={4} borderRadius="md" alignItems="flex-start">

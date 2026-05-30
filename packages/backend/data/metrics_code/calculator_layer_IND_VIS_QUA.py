@@ -45,6 +45,19 @@ print(f" Aggregation: {INDICATOR.get('aggregation', 'sum')}")
 # CALCULATION FUNCTION
 # =============================================================================
 def calculate_indicator(values: Dict[str, float]) -> Dict:
+    # v8.0 — graceful skip when called per-image. This is a composite/
+    # aggregator indicator that needs other-indicators or multi-location
+    # input, not a single image. The orchestrator iterates per-image with
+    # image_path strings; without this guard we'd raise AttributeError on
+    # the first .get() call. Downstream composite callers that pass the
+    # correct dict input still execute the formula below.
+    if isinstance(values, str):
+        return {
+            "success": False,
+            "value": None,
+            "error": "IND_VIS_QUA: composite indicator — call after per-image metrics are computed; cannot evaluate from a single image_path",
+            "skip_reason": "composite_or_aggregator",
+        }
     try:
         comps = INDICATOR.get('components', [])
 

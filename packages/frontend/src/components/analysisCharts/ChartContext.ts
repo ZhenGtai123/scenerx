@@ -144,8 +144,38 @@ export function buildChartContext(args: BuildArgs): ChartContext {
     ),
   ).sort();
 
-  const effectiveClustering =
-    clusteringResult?.clustering ?? zoneAnalysisResult?.clustering ?? null;
+  // v4.x — PER-VIEW PRIORITY for clustering data + zone-level guard.
+  //
+  // Source priority inverted: zoneAnalysisResult.clustering wins over
+  // clusteringResult.clustering. Rationale:
+  //   • zoneAnalysisResult is per-view: each multi-zone within-zone drill
+  //     (all_sub_clusters / within_zone:zone_X) gets its own .clustering
+  //     sub-key set by the within-zones endpoint, so reading from it
+  //     gives the drill-specific clusters.
+  //   • clusteringResult.clustering is project-level: in multi-zone
+  //     within-zone mode it's `first_cl` (the first zone's clustering), which
+  //     is the same regardless of which drill the user is looking at.
+  //   • For single-zone Option C, both sources hold the same pooled GMM
+  //     clustering, so the priority order doesn't change rendered output.
+  //
+  // ZONE-LEVEL GUARD: when the active view is zone-level (zone_source !==
+  // 'cluster'), drop the fallback chain entirely. Otherwise on views like
+  // "Parent zones" (zone_source='zone'), the fallback paints the
+  // project-level first_cl (= first zone's clustering) into every cluster
+  // chart (silhouette plot, centroid heatmap, etc.), making it look like
+  // "both zones were clustered together as one pool of 15 points" when in
+  // fact the backend ran clustering per-zone independently. The within-zones
+  // endpoint does NOT do pooled clustering — each user zone gets its own
+  // separate clustering run; pooled-looking charts on zone-level views are
+  // purely a frontend fallback artifact.
+  //
+  // Single-zone Option C: zoneAnalysisResult IS the cluster-rebuilt ZAR
+  // (zone_source='cluster' set by the clustering endpoint), so the guard
+  // passes and cluster charts render normally.
+  const isZoneLevelView = zoneAnalysisResult?.zone_source !== 'cluster';
+  const effectiveClustering = isZoneLevelView
+    ? null
+    : (zoneAnalysisResult?.clustering ?? clusteringResult?.clustering ?? null);
 
   // v7.0 data
   // image_records are stripped from the SSE pipeline result to keep the payload small

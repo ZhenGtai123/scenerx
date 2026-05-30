@@ -23,7 +23,8 @@ import { BookOpen, ChevronDown, ChevronUp, ArrowRight } from 'lucide-react';
  * Reports page. Gives users a quick map of:
  *   - what each of the 5 sections answers
  *   - the data-level funnel (Image → Zone → Cross-zone → Cluster)
- *   - the refCode scheme (A1/A2 · B1–B4 · C1–C4 · D1–D3) used throughout
+ *   - the refCode scheme (A1/A2 · B1–B4 · C1–C4 · D1–D3, plus E1–E8
+ *     when clustering has run) used throughout
  *
  * Default expanded; can be collapsed by clicking the chevron.
  */
@@ -36,9 +37,8 @@ interface SectionEntry {
   anchorId: string;
 }
 
-// v4 polish — Section E (Cluster Diagnostics) removed from the guide as a
-// prerequisite. Cluster diagnostic charts (silhouette, condensed tree,
-// centroid heatmap) still render on the Reports page when clustering ran,
+// v4 polish — Section E (Cluster Diagnostics) is not a prerequisite in this
+// guide. Cluster diagnostic charts (E1–E8) still render on the Reports page when clustering ran,
 // but they don't get their own top-level section in this map / data-level
 // funnel anymore. Keeping the guide simpler and less branchy.
 const SECTIONS: SectionEntry[] = [

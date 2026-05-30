@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo } from 'react';
+import { useCallback, useMemo } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { queryKeys } from '../hooks/useApi';
@@ -16,10 +16,6 @@ import {
   Badge,
   Alert,
   AlertIcon,
-  Divider,
-  Switch,
-  FormControl,
-  FormLabel,
   Tag,
   TagLabel,
   Wrap,
@@ -38,6 +34,7 @@ import useAppStore from '../store/useAppStore';
 import useAppToast from '../hooks/useAppToast';
 import PageShell from '../components/PageShell';
 import PageHeader from '../components/PageHeader';
+import { ErrorBoundary } from '../components/ErrorBoundary';
 
 const STEP_STATUS_COLORS: Record<string, string> = {
   completed: 'green',
@@ -73,20 +70,34 @@ function Analysis() {
     navigate(`/projects/${routeProjectId}/reports`);
   }, [setSingleZoneStrategy, setMultiZoneStrategy, navigate, routeProjectId]);
 
-  // Config state
-  const [useLlm, setUseLlm] = useState(true);
+  // v4.x — Analysis pipeline is calc-only. The previous "Use LLM (Stage 3)"
+  // switch was misleading because the backend has unconditionally skipped
+  // Stage 3 in the pipeline since v4/Module 14 (see
+  // packages/backend/app/api/routes/analysis.py:1948-1981). All LLM-driven
+  // analysis (design strategies, AI report, per-chart summaries) and
+  // clustering are now triggered on demand from per-section buttons on the
+  // Reports page. No pipeline config beyond indicator selection remains.
 
   // Queries
-  const { data: projects } = useProjects();
+  const { data: projects, isLoading: projectsLoading } = useProjects();
   const { data: calculators } = useCalculators();
 
   const selectedProjectId = routeProjectId || '';
+  const selectedProject = useMemo(() => {
+    if (!selectedProjectId || !projects) return null;
+    return projects.find(p => p.id === selectedProjectId) ?? null;
+  }, [selectedProjectId, projects]);
   const selectedIndicatorIds = useMemo(() => {
     if (!calculators || calculators.length === 0) return [];
-    return selectedIndicators
+    // Prefer the FETCHED project's selected_indicators so the chips render as
+    // soon as the project list lands — independent of when the Zustand store
+    // hydrates. Navigating BACK to this page used to flash "0 indicators"
+    // until store hydration caught up; the store is the pre-hydration fallback.
+    const src = (selectedProject?.selected_indicators ?? selectedIndicators) as { indicator_id: string }[];
+    return src
       .map(i => i.indicator_id)
       .filter(id => calculators.some(c => c.id === id));
-  }, [selectedIndicators, calculators]);
+  }, [selectedProject, selectedIndicators, calculators]);
 
   // A pipeline is "running for *this* project" iff the global run state is
   // active and pinned to this projectId. If another project's pipeline is in
@@ -99,11 +110,6 @@ function Analysis() {
   // active; once that step completes, hide them so they don't show stale
   // values while later stages run.
   const calcDone = streamSteps.some(s => s.step === 'run_calculations' && s.status === 'completed');
-
-  const selectedProject = useMemo(() => {
-    if (!selectedProjectId || !projects) return null;
-    return projects.find(p => p.id === selectedProjectId) ?? null;
-  }, [selectedProjectId, projects]);
 
   const projectSummary = useMemo(() => {
     if (!selectedProject) return null;
@@ -122,11 +128,17 @@ function Analysis() {
   const handleRunPipeline = useCallback(async () => {
     if (!selectedProjectId || selectedIndicatorIds.length === 0) return;
     const projectName = selectedProject?.project_name || routeProjectId || 'Unknown';
+    // v4.x — When the project is in panorama mode, run the pipeline
+    // sequentially per active view. The store-level loop in startPipeline
+    // takes care of sequencing; we just hand it the views the user picked
+    // in Vision Analysis (persisted on `project.active_panorama_views`).
+    // Empty / undefined → legacy single-view run.
+    const panoramaViews = selectedProject?.active_panorama_views ?? [];
     await startPipeline({
       projectId: selectedProjectId,
       projectName,
       indicatorIds: selectedIndicatorIds,
-      useLlm,
+      panoramaViews: panoramaViews.length > 0 ? panoramaViews : undefined,
       onComplete: () => {
         toast({ title: 'Pipeline complete', status: 'success', duration: 3000 });
         // CRITICAL — refetch the project from /api/projects/{id} so the
@@ -145,7 +157,7 @@ function Analysis() {
       },
       onError: (msg) => toast({ title: msg, status: 'error' }),
     });
-  }, [selectedProjectId, selectedIndicatorIds, useLlm, selectedProject, routeProjectId, startPipeline, toast, queryClient]);
+  }, [selectedProjectId, selectedIndicatorIds, selectedProject, routeProjectId, startPipeline, toast, queryClient]);
 
   // Pipeline ran successfully — user can proceed to Reports even if zone_analysis
   // is empty (e.g. n_zones=1 with nothing to compare). Reports page handles nulls.
@@ -156,13 +168,17 @@ function Analysis() {
       <PageHeader title="Analysis Pipeline" />
 
       {/* Pipeline Configuration */}
+      {/* v4.x — Per-card ErrorBoundary so a crash in the config form (e.g.
+          missing indicator definitions, malformed project payload) doesn't
+          take out the pipeline detail card or results summary below it. */}
+      <ErrorBoundary label="Pipeline Configuration card">
       <Card mb={6}>
         <CardHeader>
           <Heading size="md">Pipeline Configuration</Heading>
         </CardHeader>
         <CardBody>
           <Text fontWeight="bold" mb={3}>
-            Project: {selectedProject?.project_name || routeProjectId || 'No project'}
+            Project: {selectedProject?.project_name || (projectsLoading ? 'Loading…' : (routeProjectId || 'No project'))}
           </Text>
 
           {isRunningElsewhere && (
@@ -205,28 +221,29 @@ function Analysis() {
                 </WrapItem>
               ))}
             </Wrap>
-            {selectedIndicatorIds.length === 0 && (
+            {selectedIndicatorIds.length === 0 && selectedProject && (
               <Text fontSize="sm" color="orange.500">
                 No indicators selected. Go back to the Indicators step to select indicators.
               </Text>
             )}
+            {selectedIndicatorIds.length === 0 && !selectedProject && projectsLoading && (
+              <Text fontSize="sm" color="gray.500">Loading project…</Text>
+            )}
           </Box>
 
-          <Divider mb={4} />
-
-          <Text fontSize="xs" fontWeight="semibold" color="gray.500" textTransform="uppercase" letterSpacing="wide" mb={2}>
-            Analysis Parameters
-          </Text>
-          <SimpleGrid columns={{ base: 1, md: 2 }} spacing={4} alignItems="end" mb={4}>
-            <FormControl display="flex" alignItems="center">
-              <Tooltip label="When enabled, Stage 3 uses LLM for context-aware design strategies (Agent A determines direction). When disabled, uses rule-based matching." placement="top" hasArrow maxW="320px">
-                <FormLabel fontSize="sm" mb={0} cursor="help" borderBottom="1px dashed" borderColor="gray.300">
-                  Use LLM (Stage 3)
-                </FormLabel>
-              </Tooltip>
-              <Switch isChecked={useLlm} onChange={(e) => setUseLlm(e.target.checked)} colorScheme="green" />
-            </FormControl>
-          </SimpleGrid>
+          {/* v4.x — No "Analysis Parameters" block. The previous Stage 3 LLM
+              toggle was removed because the backend always skips Stage 3 in
+              the pipeline; design strategies + AI report + clustering all run
+              on demand from per-section Generate buttons on the Reports page.
+              See the comment near `const handleRunPipeline` above. */}
+          <Alert status="info" mb={4} mt={2} fontSize="sm">
+            <AlertIcon />
+            <Box>
+              This pipeline only computes indicator values. LLM analysis
+              (design strategies, AI report) and clustering are triggered
+              on demand from the Reports page after you pick a view.
+            </Box>
+          </Alert>
 
           <Button
             colorScheme="green"
@@ -238,18 +255,20 @@ function Analysis() {
               pipelineRun.isRunning ||
               projectSummary?.analyzedImages === 0
             }
-            mt={4}
+            mt={2}
           >
             Run Pipeline
           </Button>
         </CardBody>
       </Card>
+      </ErrorBoundary>
 
       {/* Pipeline detail during a streaming run — complements the top sticky
           banner (which already shows progress %, ETA, active stage, Cancel).
           This card carries info the banner can't fit: the current image
           filename, success/failure counters, and the full stage history. */}
       {isRunningHere && (
+        <ErrorBoundary label="Pipeline Status Detail card">
         <Card mb={6}>
           <CardHeader>
             <Heading size="md">Pipeline Detail</Heading>
@@ -302,10 +321,12 @@ function Analysis() {
             </VStack>
           </CardBody>
         </Card>
+        </ErrorBoundary>
       )}
 
       {/* Pipeline Result Summary */}
       {pipelineResult && !isRunningHere && (
+        <ErrorBoundary label="Pipeline Results Summary card">
         <Card mb={6}>
           <CardHeader>
             <Heading size="md">Pipeline Results</Heading>
@@ -423,6 +444,7 @@ function Analysis() {
             )}
           </CardBody>
         </Card>
+        </ErrorBoundary>
       )}
 
       {/* Empty state */}

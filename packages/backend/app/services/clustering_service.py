@@ -1,37 +1,34 @@
 """
-SVC Archetype Clustering Service (v6.1 — HDBSCAN density clustering)
+SVC Archetype Clustering Service (GMM-BIC primary; KMeans fallback)
 
-Density-based clustering on geo-located image points to discover data-driven
-spatial archetypes. HDBSCAN replaces the v6.0 KMeans + silhouette-K-search
-because HDBSCAN:
-  - finds natural cluster count from data density (no K to pick)
-  - tolerates non-spherical clusters and varying density
-  - flags outlier images as "noise" (label = -1) instead of forcing them
-    into the nearest centroid
-  - produces a `condensed tree` we can plot for cluster-stability diagnostics
+Clusters geo-located image points to discover data-driven spatial archetypes.
+
+Method history:
+  - v6.0: KMeans + silhouette-K search
+  - v6.1: density-based clustering
+  - v6.2 (current): Gaussian Mixture with BIC-selected K is the single primary
+    method. Street-view indicator values vary CONTINUOUSLY along a route, so
+    the density valleys that density-based methods rely on rarely exist (it kept returning < 2
+    clusters and falling back). GMM models the data as a probabilistic mixture
+    and BIC selects K with a built-in complexity penalty. See the rationale
+    block in cluster().
 
 Pipeline:
   1. Build point × indicator matrix from per-image metrics
   2. Standardise (z-scores)
-  3. HDBSCAN fit → labels (-1 = noise) + cluster_persistence + condensed_tree
-  4. Reassign noise points to nearest non-noise centroid (so downstream
-     zone_diagnostics still cover all points), but track the original noise
-     ids in noise_point_ids for the spatial-map chart.
-  5. KNN spatial smoothing (majority vote, optional) — same as v6.0
-  6. Per-point silhouette coefficient (against final labels) for the
+  3. GMM-BIC fit -> labels + per-K BIC/silhouette diagnostic.
+     KMeans + multi-criterion K vote is the numerical-failure fallback.
+  4. KNN spatial smoothing (majority vote, optional)
+  5. Per-point silhouette coefficient (against final labels) for the
      silhouette-plot chart
-  7. Profile archetypes (centroid values + z-scores)
-  8. Name archetypes (top z-score features)
-  9. Generate segment diagnostics (descriptive, zone_diagnostics-compatible)
+  6. Ward hierarchical linkage for the dendrogram chart
+  7. Profile + name archetypes (centroid values + z-scores)
+  8. Generate segment diagnostics (descriptive, zone_diagnostics-compatible)
 
-Fallback: if HDBSCAN finds < 2 clusters (e.g. the data is uniformly dense
-or extremely sparse), fall back to KMeans + silhouette-K to guarantee a
-non-empty result for the user.
-
-v6.0 → v6.1 change: HDBSCAN replaces KMeans; new fields cluster_persistence,
-silhouette_per_point, noise_count, noise_point_ids, condensed_tree returned
-on ClusteringResult. dendrogram_linkage (Ward) still computed for backward
-compat with the old dendrogram chart.
+Note: the legacy density-clustering outputs (condensed_tree, cluster_persistence,
+noise fields) are no longer produced. The dead density-clustering helper methods
+and the condensed-tree chart were removed; ClusteringResult may still
+carry those fields as empty for backward compatibility.
 """
 
 import logging
@@ -45,22 +42,6 @@ from sklearn.metrics import silhouette_samples, silhouette_score
 from sklearn.mixture import GaussianMixture
 from sklearn.neighbors import NearestNeighbors
 from sklearn.preprocessing import StandardScaler
-
-# hdbscan is an optional runtime dependency. We import it lazily inside
-# _run_hdbscan so the FastAPI backend can still boot when the package
-# isn't installed yet (e.g. immediately after `git pull` before
-# `pip install -r requirements.txt`). When hdbscan is missing, the
-# clustering pipeline transparently falls back to KMeans + silhouette-K.
-try:
-    import hdbscan as _hdbscan_module
-    _HDBSCAN_AVAILABLE = True
-except Exception as _e:
-    _hdbscan_module = None
-    _HDBSCAN_AVAILABLE = False
-    logging.getLogger(__name__).warning(
-        "hdbscan not installed (%s) — clustering will fall back to KMeans. "
-        "Install with: pip install hdbscan==0.8.40", _e,
-    )
 
 from app.models.analysis import (
     ArchetypeProfile,
@@ -126,10 +107,18 @@ class ClusteringService:
         scaler = StandardScaler()
         X = scaler.fit_transform(df.values)
 
-        # 3. HDBSCAN density clustering. min_cluster_size scales with dataset
-        # size — too small fragments into many tiny clusters; too large misses
-        # legitimate small archetypes. Heuristic: 5 % of N, clamped to [5, 20].
+        # 3. Cluster-size heuristics (legacy density params). min_cluster_size
+        # scales with dataset size — too small fragments into many tiny
+        # clusters; too large misses legitimate small archetypes. Heuristic:
+        # 5 % of N, clamped to [5, 20].
         n = len(X)
+
+        # ── v6.2 cluster-validity — Hopkins clustering-tendency on the
+        # standardised matrix, computed once BEFORE any partition is
+        # selected so the pipeline never imposes archetypes on data that
+        # has no cluster structure. ──
+        hopkins = self._hopkins_statistic(X)
+
         min_cluster_size = max(5, min(20, int(n * 0.05)))
         min_samples = max(3, min_cluster_size // 2)
 
@@ -138,7 +127,7 @@ class ClusteringService:
         #
         # Rationale:
         #   - Street-view scenes vary CONTINUOUSLY along a route — density-
-        #     based clustering (HDBSCAN) assumes density valleys that often
+        #     based clustering assumes density valleys that often
         #     do not exist in this data type.
         #   - GMM models the data as a probabilistic mixture, naturally
         #     handles overlapping / non-spherical clusters.
@@ -178,7 +167,13 @@ class ClusteringService:
             best_k, best_score, labels, kmeans_scores = self._find_optimal_k(X, max_k)
             silhouette_scores = kmeans_scores
             n_clusters = best_k
-            hdb_method = f"KMeans (GMM-fallback, multi-criterion k={best_k})"
+            hdb_method = f"KMeans (GMM-fallback, silhouette-gated k={best_k})"
+
+        # ── v6.2 cluster-validity — Tibshirani gap statistic over the
+        # K-sweep, reported as an independent K-validity criterion
+        # alongside silhouette / BIC. Diagnostic only: it does NOT
+        # override the primary K selection above.
+        gap_diagnostic = self._gap_statistic(X, k_range=(2, MAX_K_TRY))
 
         # Final aggregate silhouette (single number for the badge in UI)
         try:
@@ -197,8 +192,8 @@ class ClusteringService:
             for i in range(len(per_point))
         ]
 
-        # 3b. Ward hierarchical linkage (kept for legacy dendrogram chart;
-        # HDBSCAN's own condensed_tree is the new primary tree visual).
+        # 3b. Ward hierarchical linkage powers the dendrogram chart — the
+        # cluster tree visual (the former condensed-tree chart was removed).
         try:
             Z_linkage = linkage(X, method="ward", metric="euclidean").tolist()
         except Exception as e:
@@ -208,7 +203,19 @@ class ClusteringService:
         # 4. KNN spatial smoothing (if coordinates available). Same logic
         # as v6.0 — wipes salt-and-pepper specks but preserves cluster shape.
         has_coords = coords is not None and len(coords) == len(labels)
+        # has_FULL_coords = every row has GPS. Spatial smoothing can run over
+        # just the GPS-bearing subset (has_coords), but the segment builder,
+        # diagnostics, and the lat/lng arrays for the map still require FULL
+        # coverage to stay aligned + NaN-free — so they keep the old
+        # all-or-nothing contract via has_full_coords.
+        has_full_coords = has_coords and bool(np.isfinite(coords).all())
         labels_raw = labels.copy()
+
+        # ── v6.2 cluster-validity — Hennig bootstrap stability of the
+        # feature-space partition, measured on the pre-smoothing labels.
+        cluster_stability = self._bootstrap_cluster_stability(
+            X, labels_raw, n_clusters)
+
         if has_coords and knn_k > 0 and len(labels) > knn_k:
             labels = self._knn_smooth(coords, labels, knn_k)
             logger.info("KNN smoothing applied (k=%d)", knn_k)
@@ -218,17 +225,17 @@ class ClusteringService:
 
         # 6. Build spatial segments
         segments = self._build_segments(
-            df, labels, point_ids, coords, archetypes, ind_ids,
+            df, labels, point_ids, coords if has_full_coords else None, archetypes, ind_ids,
         )
 
         # 7. Segment diagnostics (descriptive)
         segment_diagnostics = self._build_segment_diagnostics(
             df, X, labels, ind_ids, indicator_definitions,
-            archetypes, coords, point_ids,
+            archetypes, coords if has_full_coords else None, point_ids,
         )
 
-        point_lats = coords[:, 0].tolist() if has_coords else []
-        point_lngs = coords[:, 1].tolist() if has_coords else []
+        point_lats = coords[:, 0].tolist() if has_full_coords else []
+        point_lngs = coords[:, 1].tolist() if has_full_coords else []
 
         method_str = hdb_method
         if has_coords:
@@ -238,7 +245,7 @@ class ClusteringService:
             method=method_str,
             k=n_clusters,
             silhouette_score=round(agg_silhouette, 4),
-            silhouette_scores=silhouette_scores,  # only populated on KMeans fallback
+            silhouette_scores=silhouette_scores,  # per-K diagnostic (GMM-BIC sweep or KMeans fallback)
             spatial_smooth_k=knn_k if has_coords else 0,
             layer_used=layer,
             archetype_profiles=archetypes,
@@ -254,6 +261,12 @@ class ClusteringService:
             noise_count=int(noise_mask.sum()),
             noise_point_ids=noise_point_ids,
             condensed_tree=condensed_tree,
+            hopkins_statistic=round(float(hopkins), 4),
+            gap_statistic=gap_diagnostic,
+            cluster_stability=cluster_stability,
+            cluster_stability_method=(
+                "Hennig bootstrap · 100 resamples · KMeans · per-cluster max Jaccard"
+            ),
         ), segment_diagnostics
 
     # ------------------------------------------------------------------
@@ -283,8 +296,14 @@ class ClusteringService:
             point_ids.append(pm.get("point_id", f"pt_{len(point_ids)}"))
             lat = pm.get("lat")
             lng = pm.get("lng")
+            # Append for EVERY kept row (aligned 1:1 with df) — NaN when GPS is
+            # missing — so spatial smoothing can run over the GPS-bearing
+            # subset instead of being disabled for the whole run when any one
+            # image lacks coordinates.
             if lat is not None and lng is not None:
                 coords_list.append([float(lat), float(lng)])
+            else:
+                coords_list.append([float("nan"), float("nan")])
 
         df = pd.DataFrame(rows, columns=ind_ids).dropna(how="all")
         # v4 polish — defensive NaN handling pipeline. Both KMeans (fallback)
@@ -322,136 +341,43 @@ class ClusteringService:
             )
             df = df.fillna(0.0)
 
+        # coords_list is aligned 1:1 with kept rows (NaN rows where GPS is
+        # missing). Expose it when at least one row has valid coordinates;
+        # the subset-aware smoother handles the NaN rows, and the full-GPS
+        # consumers gate on np.isfinite separately in cluster().
         coords = None
-        if len(coords_list) == len(df):
-            coords = np.array(coords_list)
+        if coords_list and len(coords_list) == len(df):
+            coords_arr = np.array(coords_list, dtype=float)
+            if np.isfinite(coords_arr).all(axis=1).any():
+                coords = coords_arr
 
         return df, coords, point_ids[:len(df)]
-
-    @staticmethod
-    def _run_hdbscan(
-        X: np.ndarray,
-        min_cluster_size: int,
-        min_samples: int,
-        cluster_selection_method: str = "eom",
-    ) -> tuple[np.ndarray, dict[str, float], list[dict], str]:
-        """Run HDBSCAN clustering and extract persistence + condensed tree.
-
-        Returns
-        -------
-        labels : np.ndarray
-            Cluster labels with -1 for noise points.
-        persistence : dict
-            Map cluster_id (str) → persistence score (HDBSCAN's stability).
-        condensed_tree : list[dict]
-            Edges of the condensed cluster tree, suitable for D3 rendering.
-            Each edge: {parent, child, lambda_val, child_size}.
-        method : str
-            Human-readable algorithm description.
-        """
-        # Graceful degradation if hdbscan isn't installed: pretend everything
-        # is noise so the caller falls back to KMeans.
-        if not _HDBSCAN_AVAILABLE or _hdbscan_module is None:
-            logger.warning(
-                "hdbscan not available — short-circuiting to all-noise so the "
-                "caller falls back to KMeans"
-            )
-            return np.full(len(X), -1, dtype=int), {}, [], "HDBSCAN (not installed)"
-        try:
-            clusterer = _hdbscan_module.HDBSCAN(
-                min_cluster_size=min_cluster_size,
-                min_samples=min_samples,
-                cluster_selection_method=cluster_selection_method,
-                metric="euclidean",
-                allow_single_cluster=False,
-            )
-            labels = clusterer.fit_predict(X)
-
-            # Per-cluster persistence (cluster stability under density variation).
-            persistence: dict[str, float] = {}
-            try:
-                for cid, p in enumerate(clusterer.cluster_persistence_):
-                    persistence[str(cid)] = round(float(p), 4)
-            except Exception:
-                persistence = {}
-
-            # Condensed tree → list of edge dicts for the front-end visual.
-            condensed_tree: list[dict] = []
-            try:
-                ct = clusterer.condensed_tree_.to_pandas()
-                # Columns: parent, child, lambda_val, child_size
-                for _, row in ct.iterrows():
-                    condensed_tree.append({
-                        "parent": int(row["parent"]),
-                        "child": int(row["child"]),
-                        "lambda_val": round(float(row["lambda_val"]), 6),
-                        "child_size": int(row["child_size"]),
-                    })
-            except Exception as e:
-                logger.warning("Could not extract HDBSCAN condensed tree: %s", e)
-                condensed_tree = []
-
-            method = (
-                f"HDBSCAN (min_cluster_size={min_cluster_size}, "
-                f"min_samples={min_samples}, sel={cluster_selection_method})"
-            )
-            return labels, persistence, condensed_tree, method
-        except Exception as e:
-            logger.error("HDBSCAN failed: %s — returning all-noise labels", e)
-            return np.full(len(X), -1, dtype=int), {}, [], "HDBSCAN (error)"
-
-    @staticmethod
-    def _reassign_noise(X: np.ndarray, labels: np.ndarray) -> np.ndarray:
-        """Reassign noise points (label = -1) to the nearest non-noise centroid.
-
-        Downstream zone_diagnostics, archetype profiles and spatial segments
-        all expect every point to belong to a cluster. We keep the original
-        noise mask in `noise_point_ids` for UI rendering, but the labels
-        array used by the rest of the pipeline has noise reassigned.
-
-        If every point was noise, returns labels unchanged (the caller falls
-        back to KMeans).
-        """
-        noise_mask = labels == -1
-        if not noise_mask.any():
-            return labels.copy()
-        non_noise_mask = ~noise_mask
-        if not non_noise_mask.any():
-            return labels.copy()
-
-        # Compute centroid per non-noise cluster
-        out = labels.copy()
-        unique = sorted(set(int(l) for l in labels[non_noise_mask]))
-        centroids = np.array([
-            X[labels == cid].mean(axis=0) for cid in unique
-        ])
-
-        # For each noise point, assign to nearest centroid (Euclidean)
-        noise_idx = np.where(noise_mask)[0]
-        for i in noise_idx:
-            dists = np.linalg.norm(centroids - X[i], axis=1)
-            out[i] = unique[int(np.argmin(dists))]
-        return out
 
     @staticmethod
     def _find_optimal_k(
         X: np.ndarray,
         max_k: int,
     ) -> tuple[int, float, np.ndarray, list[dict]]:
-        """KMeans K-sweep with HONEST K selection.
+        """KMeans K-sweep with silhouette-gated K selection (v6.2).
 
-        We compute three internal-validity criteria per K:
-          - silhouette   (higher = better separation; biased toward small K)
-          - Davies-Bouldin  (lower = better; less biased than silhouette)
-          - Calinski-Harabasz (higher = better; rewards compact + separated)
+        Three internal-validity criteria are computed per K:
+          - silhouette        (higher = better; the ONLY one of the three
+                               with an ABSOLUTE interpretation — >=0.5 strong,
+                               0.25-0.5 weak/overlapping, <=0.25 no structure)
+          - Davies-Bouldin    (lower = better; RELATIVE — no absolute scale)
+          - Calinski-Harabasz (higher = better; RELATIVE — no absolute scale)
 
-        K is chosen by majority vote across the three criteria. This avoids
-        the well-known silhouette bias toward K=2 while still letting K=2
-        win when it's genuinely best across all three.
-
-        Returns the silhouette curve in `all_scores` for the front-end chart
-        (the chart name says silhouette, so we keep silhouette as the
-        displayed metric — but the K winner uses the full ensemble).
+        K is decided by SILHOUETTE, because it is the only criterion that can
+        say whether a partition is meaningful at all. Davies-Bouldin and
+        Calinski-Harabasz are relative indices: on near-continuous data they
+        always nominate some K, and an earlier multi-criterion vote let them
+        override silhouette into a worse-separated partition (e.g. selecting
+        K=6 at silhouette 0.19 when the silhouette peak was K=3 at 0.28).
+        They are now used only to break ties between K values whose
+        silhouette is within `sil_tol` of the peak, and are reported in
+        `all_scores` for transparency. When the silhouette peak itself is
+        <= 0.25 every row is flagged `low_structure=True` so downstream text
+        can state honestly that the data has no rich cluster structure.
         """
         from sklearn.metrics import davies_bouldin_score, calinski_harabasz_score
         n = len(X)
@@ -486,28 +412,31 @@ class ClusteringService:
         if not per_k_sil:
             return 2, -1.0, np.zeros(n, dtype=int), all_scores
 
-        # Each criterion votes for its best K. Final K = mode of votes,
-        # ties broken by silhouette. This is the "honest" K — no flooring.
-        vote_sil = max(per_k_sil, key=per_k_sil.get)
-        vote_db = min(per_k_db, key=per_k_db.get)   # lower DB = better
-        vote_ch = max(per_k_ch, key=per_k_ch.get)
-        votes = [vote_sil, vote_db, vote_ch]
-        from collections import Counter
-        vote_counts = Counter(votes)
-        most_common = vote_counts.most_common()
-        if most_common[0][1] >= 2:
-            best_k = most_common[0][0]
+        # ── v6.2 silhouette-gated selection ──
+        # Silhouette decides K. Davies-Bouldin / Calinski-Harabasz only break
+        # ties between K values whose silhouette is statistically
+        # indistinguishable from the peak (within sil_tol).
+        sil_tol = 0.02
+        peak_sil = max(per_k_sil.values())
+        contenders = [k for k, s in per_k_sil.items() if peak_sil - s <= sil_tol]
+        if len(contenders) == 1:
+            best_k = contenders[0]
         else:
-            # All three disagree (3-way split). Default to silhouette (the
-            # criterion the user sees on the chart) — most defensible.
-            best_k = vote_sil
+            # tie-break among silhouette-equivalent K: lowest Davies-Bouldin
+            best_k = min(contenders, key=lambda k: per_k_db[k])
+        # peak silhouette <= 0.25 -> no rich cluster structure; any K is then
+        # a descriptive segmentation of a continuum, not a set of natural kinds.
+        low_structure = peak_sil <= 0.25
 
-        # Record the rationale for downstream transparency
+        vote_sil = max(per_k_sil, key=per_k_sil.get)
+        vote_db = min(per_k_db, key=per_k_db.get)
+        vote_ch = max(per_k_ch, key=per_k_ch.get)
         for row in all_scores:
             row["vote_silhouette"] = (row["k"] == vote_sil)
             row["vote_davies_bouldin"] = (row["k"] == vote_db)
             row["vote_calinski_harabasz"] = (row["k"] == vote_ch)
             row["is_selected"] = (row["k"] == best_k)
+            row["low_structure"] = low_structure
 
         return best_k, per_k_sil[best_k], per_k_labels[best_k], all_scores
 
@@ -516,22 +445,26 @@ class ClusteringService:
         X: np.ndarray,
         k_range: tuple[int, int] = (2, 8),
     ) -> tuple[int, float, np.ndarray | None, list[dict]]:
-        """Gaussian Mixture clustering with BIC-selected K (single primary method).
+        """Gaussian Mixture clustering with silhouette-gated, BIC-arbitrated K.
 
         Returns
         -------
-        best_k          : int       — K chosen by minimum BIC
+        best_k          : int       — K selected by the silhouette gate (BIC breaks ties)
         best_silhouette : float     — silhouette at the chosen K (for UI badge)
         best_labels     : np.ndarray| None — cluster assignments, None on failure
         diagnostic      : list[dict] — per-K metrics for the silhouette-curve chart:
             [{"k": int, "bic": float, "silhouette": float, "log_likelihood": float,
               "is_selected": bool}, ...]
 
-        BIC is the standard model-selection criterion for finite mixture
-        models (Schwarz 1978). It approximates the log of the Bayes factor,
-        with an explicit complexity penalty of (k * params_per_component *
-        log(n)) / 2 — so it discourages overfitting without an arbitrary
-        manual floor.
+        BIC (Schwarz 1978) is the standard model-selection criterion for
+        finite mixture models, but on a continuous streetscape gradient it
+        keeps adding mixture components whenever the likelihood gain beats
+        its complexity penalty — carving a structureless cloud into
+        separation-free slivers. v6.2 therefore gates K on the silhouette
+        coefficient (the only absolute-scale validity index): among the K
+        values whose silhouette sits within ``sil_tol`` of the peak, BIC
+        arbitrates (lower = better). This keeps the GMM-BIC path as honest
+        about weak structure as the KMeans fallback's ``_find_optimal_k``.
         """
         n = len(X)
         lo, hi = k_range
@@ -571,8 +504,28 @@ class ClusteringService:
         if not per_k_bic:
             return 0, -1.0, None, []
 
-        # BIC: lower = better
-        best_k = min(per_k_bic, key=per_k_bic.get)
+        # ── v6.2 silhouette-gated selection (mirrors _find_optimal_k) ──
+        # Pure minimum-BIC keeps adding mixture components on a continuous
+        # gradient. Silhouette is the only index on an absolute scale, so it
+        # gates K: among the K values whose silhouette is within sil_tol of
+        # the peak, BIC arbitrates (lower = better). If even the peak
+        # silhouette is <= 0.25 the data carries no real cluster structure
+        # and the smallest such K is the honest choice.
+        sil_tol = 0.02
+        peak_sil = max(per_k_sil.values())
+        contenders = [k for k, s in per_k_sil.items()
+                      if peak_sil - s <= sil_tol]
+        if len(contenders) == 1:
+            best_k = contenders[0]
+        else:
+            best_k = min(contenders, key=lambda k: per_k_bic[k])
+        low_structure = peak_sil <= 0.25
+        if low_structure:
+            logger.info(
+                "GMM-BIC: peak silhouette %.3f <= 0.25 — weak cluster "
+                "structure; selecting smallest silhouette-tied k=%d",
+                peak_sil, best_k,
+            )
         best_sil = per_k_sil[best_k]
         best_labels = per_k_labels[best_k]
 
@@ -589,22 +542,193 @@ class ClusteringService:
 
         return best_k, best_sil, best_labels, diagnostic
 
+    # ------------------------------------------------------------------
+    # v6.2 — cluster-validity diagnostics (tendency · gap · stability)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _hopkins_statistic(
+        X: np.ndarray,
+        sample_ratio: float = 0.1,
+        random_state: int = 42,
+    ) -> float:
+        """Hopkins statistic of clustering tendency.
+
+        Sampled on the standardised feature matrix. H ~ 0.5 means the data
+        is indistinguishable from a uniform random cloud (no meaningful
+        clusters); H -> 1.0 indicates strong cluster structure. Reporting
+        this BEFORE choosing K stops the pipeline from imposing archetypes
+        on data that has none — a continuous streetscape gradient honestly
+        scores in the 0.5-0.7 range.
+        """
+        rng = np.random.default_rng(random_state)
+        n, d = X.shape
+        m = min(max(5, int(n * sample_ratio)), n - 1)
+        if m < 1:
+            return 0.5
+        nn = NearestNeighbors(n_neighbors=2).fit(X)
+        # w_i: distance from a sampled REAL point to its nearest other real point
+        real_idx = rng.choice(n, size=m, replace=False)
+        w_dist, _ = nn.kneighbors(X[real_idx], n_neighbors=2)
+        w = w_dist[:, 1]
+        # u_i: distance from a uniform-random point to its nearest real point
+        lo, hi = X.min(axis=0), X.max(axis=0)
+        U = rng.uniform(lo, hi, size=(m, d))
+        u_dist, _ = nn.kneighbors(U, n_neighbors=1)
+        u = u_dist[:, 0]
+        denom = float(np.sum(u) + np.sum(w))
+        return 0.5 if denom == 0 else float(np.sum(u) / denom)
+
+    @staticmethod
+    def _gap_statistic(
+        X: np.ndarray,
+        k_range: tuple[int, int] = (2, 8),
+        n_refs: int = 10,
+        random_state: int = 42,
+    ) -> list[dict]:
+        """Tibshirani et al. (2001) gap statistic.
+
+        Compares the within-cluster dispersion of the data against that of
+        ``n_refs`` uniform reference datasets drawn over the data's bounding
+        box. Returns ``[{k, gap, s_k, is_selected}, ...]``; the selected K
+        is the smallest k with Gap(k) >= Gap(k+1) - s_{k+1}. Reported as an
+        independent K-validity criterion — it does NOT override the
+        primary K selection.
+        """
+        rng = np.random.default_rng(random_state)
+        lo, hi = k_range
+        hi = min(hi, len(X) - 1)
+        if hi < lo:
+            return []
+        # PCA-aligned reference box (Tibshirani et al. 2001, method b):
+        # uniform over the bounding box of the data's principal components,
+        # back-transformed to feature space. A raw axis-aligned bounding box
+        # inflates the gap for spread-out data and never lets the curve peak.
+        mu = X.mean(axis=0)
+        Xc = X - mu
+        try:
+            _, _, Vt = np.linalg.svd(Xc, full_matrices=False)
+        except np.linalg.LinAlgError:
+            Vt = np.eye(X.shape[1])
+        Xpc = Xc @ Vt.T
+        pc_lo, pc_hi = Xpc.min(axis=0), Xpc.max(axis=0)
+
+        def _make_reference() -> np.ndarray:
+            return rng.uniform(pc_lo, pc_hi, size=X.shape) @ Vt + mu
+
+        def _log_dispersion(data: np.ndarray, k: int) -> float:
+            km = KMeans(n_clusters=k, n_init=10, random_state=random_state)
+            lab = km.fit_predict(data)
+            w = 0.0
+            for c in range(k):
+                pts = data[lab == c]
+                if len(pts) > 1:
+                    w += float(((pts - pts.mean(axis=0)) ** 2).sum())
+            return float(np.log(w)) if w > 0 else 0.0
+
+        gaps: dict[int, float] = {}
+        sks: dict[int, float] = {}
+        rows: list[dict] = []
+        for k in range(lo, hi + 1):
+            obs = _log_dispersion(X, k)
+            refs = np.array([
+                _log_dispersion(_make_reference(), k)
+                for _ in range(n_refs)
+            ])
+            gap = float(refs.mean() - obs)
+            sk = float(refs.std() * np.sqrt(1.0 + 1.0 / n_refs))
+            gaps[k] = gap
+            sks[k] = sk
+            rows.append({"k": k, "gap": round(gap, 4), "s_k": round(sk, 4)})
+        best_k = lo
+        for k in range(lo, hi):
+            if gaps[k] >= gaps[k + 1] - sks[k + 1]:
+                best_k = k
+                break
+        else:
+            best_k = max(gaps, key=gaps.get) if gaps else lo
+        for r in rows:
+            r["is_selected"] = (r["k"] == best_k)
+        return rows
+
+    @staticmethod
+    def _bootstrap_cluster_stability(
+        X: np.ndarray,
+        base_labels: np.ndarray,
+        k: int,
+        n_boot: int = 100,
+        random_state: int = 42,
+    ) -> dict[str, float]:
+        """Hennig (2007) bootstrap cluster stability.
+
+        For each of ``n_boot`` bootstrap resamples the data is re-clustered
+        (KMeans, same k); for every original cluster the maximum Jaccard
+        similarity to any bootstrap cluster is recorded, then averaged.
+        Returns ``{cluster_id: mean Jaccard}`` in [0, 1]. Hennig's bands:
+        >= 0.85 highly stable, 0.75-0.85 stable, 0.60-0.75 indicates a
+        pattern, < 0.60 unstable / dissolved. This measures whether each
+        archetype is a robust feature of the data or an artefact of one
+        particular partition.
+        """
+        rng = np.random.default_rng(random_state)
+        n = len(X)
+        base = np.asarray(base_labels)
+        clusters = sorted({int(c) for c in base})
+        base_sets = {c: set(np.where(base == c)[0].tolist()) for c in clusters}
+        jacc: dict[int, list[float]] = {c: [] for c in clusters}
+        for _ in range(n_boot):
+            idx = rng.choice(n, size=n, replace=True)
+            uniq = np.unique(idx)
+            if len(uniq) <= k:
+                continue
+            try:
+                bl = KMeans(n_clusters=k, n_init=5,
+                            random_state=random_state).fit_predict(X[uniq])
+            except Exception:
+                continue
+            uniq_set = set(uniq.tolist())
+            boot_sets = [set(uniq[bl == bc].tolist()) for bc in range(k)]
+            for c in clusters:
+                orig = base_sets[c] & uniq_set
+                if not orig:
+                    continue
+                best = 0.0
+                for bs in boot_sets:
+                    union = len(orig | bs)
+                    if union:
+                        best = max(best, len(orig & bs) / union)
+                jacc[c].append(best)
+        return {
+            str(c): round(float(np.mean(v)), 4) if v else 0.0
+            for c, v in jacc.items()
+        }
+
     @staticmethod
     def _knn_smooth(
         coords: np.ndarray,
         labels: np.ndarray,
         k: int,
     ) -> np.ndarray:
-        """Relabel each point to the majority class among its k nearest neighbours."""
-        nn = NearestNeighbors(n_neighbors=min(k, len(coords)), metric="euclidean")
-        nn.fit(coords)
-        _, indices = nn.kneighbors(coords)
-        smoothed = np.empty_like(labels)
+        """Relabel each point to the majority class among its k nearest
+        neighbours. Operates ONLY over rows with valid (finite) coordinates;
+        rows without GPS keep their original feature-space label. For a fully
+        GPS-covered run this is identical to smoothing every row."""
+        valid = np.isfinite(coords).all(axis=1)
+        if int(valid.sum()) <= k:
+            return labels  # too few GPS points to smooth meaningfully
+        sub_coords = coords[valid]
+        sub_labels = labels[valid]
+        nn = NearestNeighbors(n_neighbors=min(k, len(sub_coords)), metric="euclidean")
+        nn.fit(sub_coords)
+        _, indices = nn.kneighbors(sub_coords)
+        smoothed_sub = np.empty_like(sub_labels)
         for i, neighbours in enumerate(indices):
-            neighbour_labels = labels[neighbours]
+            neighbour_labels = sub_labels[neighbours]
             counts = np.bincount(neighbour_labels)
-            smoothed[i] = int(np.argmax(counts))
-        return smoothed
+            smoothed_sub[i] = int(np.argmax(counts))
+        out = labels.copy()
+        out[valid] = smoothed_sub
+        return out
 
     @staticmethod
     def _profile_archetypes(

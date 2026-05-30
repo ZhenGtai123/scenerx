@@ -18,12 +18,13 @@ import {
   Cell,
   ResponsiveContainer,
   ErrorBar,
+  LabelList,
   LineChart,
   Line,
   ReferenceLine,
 } from 'recharts';
 import type { EnrichedZoneStat, ZoneDiagnostic, ArchetypeProfile, UploadedImage, ImageRecord, GlobalIndicatorStats, DataQualityRow, IndicatorDefinitionInput } from '../types';
-import { divergingColor, directionalColor, magnitudeColor } from '../utils/palette';
+import { divergingColor, magnitudeColor, parulaColor } from '../utils/palette';
 
 // Shared color palette for zones
 const ZONE_COLORS = [
@@ -397,6 +398,32 @@ export function ZonePriorityChart({ diagnostics }: ZonePriorityChartProps) {
           {data.map((entry, i) => (
             <Cell key={i} fill={deviationBarColor(entry.mean_abs_z)} />
           ))}
+          {/* v4.1 — value + n on each bar tip so the chart reads without
+             requiring tooltip interaction. */}
+          <LabelList
+            dataKey="mean_abs_z"
+            position="right"
+            content={(props: any) => {
+              const x = Number(props.x); const y = Number(props.y);
+              const w = Number(props.width); const h = Number(props.height);
+              const i = props.index as number | undefined;
+              if (Number.isNaN(x) || Number.isNaN(y) || i == null) return null;
+              const d = data[i];
+              // v4.x — Defensive guard against white-screen: Recharts can call
+              // this label renderer with stale indices during data transitions
+              // (e.g. when the panorama view switch swaps the diagnostics
+              // array mid-render). Without this guard `d.mean_abs_z` throws
+              // and crashes the whole React tree.
+              if (!d || typeof d.mean_abs_z !== 'number') return null;
+              return (
+                <text x={x + w + 6} y={y + h / 2}
+                      dominantBaseline="central"
+                      fontSize={11} fill="#1a202c" fontWeight={600}>
+                  {d.mean_abs_z.toFixed(2)} · n={d.point_count ?? 0}
+                </text>
+              );
+            }}
+          />
         </Bar>
       </BarChart>
     </ResponsiveContainer>
@@ -1680,24 +1707,84 @@ interface ClusterSizeChartProps {
 }
 
 export function ClusterSizeChart({ archetypes }: ClusterSizeChartProps) {
+  // v4.1 — vertical bars (already vertical) with always-visible per-bar
+  // count + share% labels. The user previously had to hover to see the
+  // value; the label is now baked into the chart so the bundle SVG export
+  // shows the same numbers without requiring tooltip interaction.
   const data = useMemo(() => {
-    return archetypes.map(a => ({
+    const total = archetypes.reduce((s, a) => s + a.point_count, 0) || 1;
+    return archetypes.map((a, idx) => ({
+      // v4.x — Short x-axis tick label so all N clusters get a tick even
+      // when N is large (Recharts auto-skips long labels to avoid overlap,
+      // hiding clusters from view). Display "#<id>" on the axis; the full
+      // descriptive label goes in the tooltip + the inside-bar annotation
+      // below so nothing is lost.
+      shortName: `#${a.archetype_id ?? idx}`,
       name: a.archetype_label,
       count: a.point_count,
+      sharePct: (a.point_count / total) * 100,
+      archetype_id: a.archetype_id,
     }));
   }, [archetypes]);
 
   if (data.length === 0) return null;
 
+  // v4.x — Bottom margin scales with label count so even short "#N" ticks
+  // get enough room when many clusters are present.
+  const bottomMargin = data.length > 8 ? 50 : 30;
+
   return (
-    <ResponsiveContainer width="100%" height={250}>
-      <BarChart data={data} margin={{ left: 10, right: 10, top: 5, bottom: 5 }}>
+    <ResponsiveContainer width="100%" height={320}>
+      <BarChart data={data} margin={{ left: 10, right: 10, top: 30, bottom: bottomMargin }}>
         <CartesianGrid strokeDasharray="3 3" />
-        <XAxis dataKey="name" tick={{ fontSize: 10 }} />
-        <YAxis tick={{ fontSize: 10 }} label={{ value: 'Points', angle: -90, position: 'insideLeft', fontSize: 10 }} />
-        <Tooltip />
+        <XAxis
+          dataKey="shortName"
+          tick={{ fontSize: 11, fontWeight: 600 }}
+          interval={0}  /* force every tick to render — no auto-skip */
+          height={30}
+        />
+        <YAxis tick={{ fontSize: 10 }}
+               label={{ value: 'Image count (points)', angle: -90,
+                        position: 'insideLeft', fontSize: 10 }} />
+        <Tooltip
+          // v4.x — Tooltip now shows the FULL descriptive archetype label
+          // (Cluster #N: <Road · features>) so users can still see what
+          // each short "#N" tick represents.
+          labelFormatter={(_label, payload) => {
+            const p = (payload?.[0]?.payload ?? {}) as { name?: string; shortName?: string };
+            return `${p.shortName ?? ''} — ${p.name ?? ''}`;
+          }}
+          formatter={(v: any, _n: any, ctx: { payload?: { sharePct?: number } }) =>
+            [`${v} · ${(ctx.payload?.sharePct ?? 0).toFixed(1)}%`, 'Count']
+          }
+        />
         <Bar dataKey="count" name="Points" barSize={40}>
-          {data.map((_, i) => <Cell key={i} fill={getZoneColor(i)} />)}
+          {data.map((d, i) =>
+            <Cell key={i} fill={getZoneColor(d.archetype_id ?? i)} />)}
+          <LabelList
+            dataKey="count"
+            position="top"
+            content={(props: any) => {
+              const x = Number(props.x);
+              const y = Number(props.y);
+              const w = Number(props.width);
+              const i = props.index as number | undefined;
+              if (Number.isNaN(x) || Number.isNaN(y) || i == null) return null;
+              const d = data[i];
+              // v4.x — Same defensive guard as the |z| LabelList above:
+              // Recharts can call this with stale indices during data
+              // transitions (panorama view switch swaps the cluster array
+              // mid-render). Crash here white-screens the whole tree.
+              if (!d || typeof d.count !== 'number' || typeof d.sharePct !== 'number') return null;
+              return (
+                <text x={x + w / 2} y={y - 8}
+                      textAnchor="middle" fontSize={10}
+                      fill="#1a202c" fontWeight={600}>
+                  {d.count} · {d.sharePct.toFixed(1)}%
+                </text>
+              );
+            }}
+          />
         </Bar>
       </BarChart>
     </ResponsiveContainer>
@@ -1705,10 +1792,266 @@ export function ClusterSizeChart({ archetypes }: ClusterSizeChartProps) {
 }
 
 
+// ===========================================================================
+// SpatialMarkerLayer — shared rendering for all GPS scatter charts
+// ===========================================================================
+//
+// All four spatial charts (B4 Zone Deviation, ValueSpatialMap,
+// SpatialScatterByLayer, ClusterSpatialBeforeAfter, generic SpatialScatterMap)
+// originally drew one fixed-radius <circle> per GPS image. For projects with
+// hundreds-to-thousands of points along a continuous path (e.g. the 1254-image
+// West Lake Inner Ring Road), r=3.5–5.5 px circles overlap so heavily that
+// spatial variation is completely invisible — every panel looks like a
+// uniform smear.
+//
+// This layer renders two modes:
+//
+//   path (default for ≥50 points with detectable order):
+//     Sort points along their acquisition sequence, then draw short coloured
+//     line segments between consecutive points. Each segment takes its
+//     colour from the start-point's value. A grey under-stroke gives the
+//     route shape; the coloured top layer encodes the indicator value.
+//     Long gaps (> breakDistanceMeters) are broken to avoid drawing
+//     diagonal "shortcuts" across the path.
+//
+//   dots (fallback for small datasets or when path order is unknown):
+//     Adaptive-radius circles. Radius shrinks as n grows so 200-1000 point
+//     datasets remain legible without manual tuning.
+//
+// Path order is determined from the leading integer in the filename
+// (`<idx>_0_<lng>_<lat>_<name>_<date>_right.png` for the SceneRx
+// street-view ingest). Callers can override via `pathOrderKey`.
+
+interface SpatialPointMin {
+  lat: number;
+  lng: number;
+  filename?: string;
+}
+
+/** Parse the leading numeric prefix of a filename, used as acquisition index.
+ *  Matches "0_…", "1090_…", etc. Returns null if no leading integer is present
+ *  (e.g. zone IDs or random hex names) — caller should then fall back to dots.
+ */
+function defaultPathOrderKey(p: SpatialPointMin): number | null {
+  const fn = p.filename;
+  if (!fn) return null;
+  const m = fn.match(/^(\d+)_/);
+  return m ? parseInt(m[1], 10) : null;
+}
+
+/** Haversine distance in metres between two GPS points. Used to break the
+ *  rendered path across long gaps so the route doesn't visually jump
+ *  between disjoint segments of the loop. */
+function metersBetween(a: SpatialPointMin, b: SpatialPointMin): number {
+  const R = 6371000;
+  const lat1 = (a.lat * Math.PI) / 180;
+  const lat2 = (b.lat * Math.PI) / 180;
+  const dLat = lat2 - lat1;
+  const dLng = ((b.lng - a.lng) * Math.PI) / 180;
+  const h =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
+}
+
+/** Adaptive radius for the dot-fallback path. Caps at baseR (caller's
+ *  intent for small n) and shrinks proportional to 1/sqrt(n) so visual
+ *  occupancy stays roughly constant across project sizes. */
+function adaptiveDotRadius(n: number, baseR: number): number {
+  if (n <= 50) return baseR;
+  return Math.max(1.2, Math.min(baseR, 180 / Math.sqrt(n)));
+}
+
+interface SpatialMarkerLayerProps<P extends SpatialPointMin> {
+  points: P[];
+  toX: (lng: number) => number;
+  toY: (lat: number) => number;
+  getColor: (p: P) => string;
+  /** Tooltip text shown on hover. */
+  getTooltip?: (p: P) => string;
+  /** Override the default filename → integer path-order extractor. Return null
+   *  to mark a point as un-orderable; the layer then falls back to dots. */
+  pathOrderKey?: (p: P) => number | null;
+  /** Render as dots regardless of n (used when caller already knows order is
+   *  not meaningful, e.g. before/after cluster comparison shows two arbitrary
+   *  label colourings). */
+  forceDotMode?: boolean;
+  /** Below this count we render dots even if order is detectable — segments
+   *  with very few points look like a sparse polyline rather than a heatmap. */
+  minPointsForPath?: number;
+  /** Break the path when two consecutive points are farther than this. */
+  breakDistanceMeters?: number;
+  /** Width of the coloured path segments (px). */
+  segmentWidth?: number;
+  /** Radius for the dot fallback when n is small. Caps adaptive shrinking. */
+  baseDotRadius?: number;
+  /** When true, draw a soft grey underlay tracing the full path before the
+   *  coloured top layer. Helps reveal the road shape independently of the
+   *  indicator values. Defaults to true in path mode. */
+  drawRouteUnderlay?: boolean;
+}
+
+function SpatialMarkerLayer<P extends SpatialPointMin>({
+  points,
+  toX,
+  toY,
+  getColor,
+  getTooltip,
+  pathOrderKey = defaultPathOrderKey,
+  forceDotMode = false,
+  minPointsForPath = 50,
+  breakDistanceMeters = 80,
+  segmentWidth = 2.5,
+  baseDotRadius = 4.5,
+  drawRouteUnderlay = true,
+}: SpatialMarkerLayerProps<P>) {
+  // Try to compute path order. If any point lacks an order key, fall back.
+  const orderedIndices: number[] | null = useMemo(() => {
+    if (forceDotMode) return null;
+    if (points.length < minPointsForPath) return null;
+    const keys: (number | null)[] = points.map(pathOrderKey);
+    if (keys.some((k) => k === null)) return null;
+    return points
+      .map((_, i) => i)
+      .sort((a, b) => (keys[a] as number) - (keys[b] as number));
+  }, [points, forceDotMode, minPointsForPath, pathOrderKey]);
+
+  if (orderedIndices) {
+    // Pre-compute which segments to draw, with an *adaptive* break threshold.
+    //
+    // Why adaptive: the original fixed-80m threshold misclassifies both
+    // extremes — for a dense urban walk (median ~13m between samples) 80m
+    // is generous and works; for a sparser drive (median ~150m) 80m would
+    // erroneously break every single segment; for a hybrid project where
+    // the collector walked one branch, drove to the next start point, and
+    // walked the second branch, we need to catch the "drove" gap without
+    // breaking the normal "walked" gaps.
+    //
+    // Approach: take the median distance between consecutive indexed
+    // points (robust to outliers), and break wherever a gap exceeds
+    // max(breakDistanceMeters, 4 × median). 4× is empirically the right
+    // multiplier — typical walking-pace GPS noise gives a stable median
+    // and real branch jumps almost always exceed 4× normal pace.
+    //
+    // This handles Y-shaped or multi-branch acquisitions cleanly:
+    //   • Continuous loop / single path → no breaks, full coloured route.
+    //   • Branch end → drive → next branch start → ONE break at the jump,
+    //     each branch renders as its own continuous coloured path.
+    //   • Doubling back along the same road → no break (small consecutive
+    //     distance), the two passes overlap on screen. This is correct:
+    //     the road was traversed twice; the last-drawn segment wins, and
+    //     a darker hue or value difference is what the user will see.
+    //   • Multiple disjoint sub-projects (e.g. east loop + west loop) →
+    //     break at every jump, each loop renders independently.
+    const consecutiveDistances: number[] = [];
+    for (let i = 0; i < orderedIndices.length - 1; i++) {
+      consecutiveDistances.push(
+        metersBetween(points[orderedIndices[i]], points[orderedIndices[i + 1]])
+      );
+    }
+    const sortedDists = [...consecutiveDistances].sort((a, b) => a - b);
+    const medianDist = sortedDists.length
+      ? sortedDists[Math.floor(sortedDists.length / 2)]
+      : 0;
+    const effectiveBreak = Math.max(breakDistanceMeters, medianDist * 4);
+
+    const segments: Array<{ a: P; b: P; key: string }> = [];
+    for (let i = 0; i < orderedIndices.length - 1; i++) {
+      const a = points[orderedIndices[i]];
+      const b = points[orderedIndices[i + 1]];
+      if (consecutiveDistances[i] > effectiveBreak) continue;
+      segments.push({ a, b, key: `seg-${orderedIndices[i]}-${orderedIndices[i + 1]}` });
+    }
+
+    // ── Rendering notes (don't change without re-reading) ──────────────
+    //
+    // 1) strokeLinecap is `butt`, not `round`. Round caps end every segment
+    //    with a half-disc of radius=strokeWidth/2 centred on the segment
+    //    endpoint. Adjacent coloured segments share endpoints, so every
+    //    interior point ended up with TWO overlapping discs ≈ 1.25px wide;
+    //    layered over the wider grey underlay's matching disc, this read
+    //    as "a chain of beads" rather than a smooth ribbon. Butt caps end
+    //    each segment exactly at its mathematical endpoint, so flush
+    //    neighbours look continuous on dense paths (typical 13m sampling).
+    //
+    // 2) The grey underlay is barely thicker than the coloured top
+    //    (+0.4px). The original +1.5px halo was meant to highlight the
+    //    route shape, but in practice it just bled a grey edge around
+    //    every coloured segment and made the result look fuzzy. With the
+    //    smaller delta the underlay still fills in segments where the
+    //    indicator value is missing (so you can still see the route
+    //    geometry) without halo-ing every coloured pixel.
+    //
+    // 3) Tiny visual gaps at sharp turns (intersections) are an inherent
+    //    trade-off of butt caps + per-segment colouring. They're sub-
+    //    pixel for typical urban-walk smoothness (~1-2° per segment) and
+    //    only become visible at near-90° corners — which look like
+    //    intersections anyway, so the gap reads as "two roads meet".
+    return (
+      <g>
+        {drawRouteUnderlay &&
+          segments.map((s) => (
+            <line
+              key={`u-${s.key}`}
+              x1={toX(s.a.lng)}
+              y1={toY(s.a.lat)}
+              x2={toX(s.b.lng)}
+              y2={toY(s.b.lat)}
+              stroke="#E2E8F0"
+              strokeWidth={segmentWidth + 0.4}
+              strokeLinecap="butt"
+              pointerEvents="none"
+            />
+          ))}
+        {segments.map((s) => (
+          <line
+            key={`c-${s.key}`}
+            x1={toX(s.a.lng)}
+            y1={toY(s.a.lat)}
+            x2={toX(s.b.lng)}
+            y2={toY(s.b.lat)}
+            stroke={getColor(s.a)}
+            strokeWidth={segmentWidth}
+            strokeLinecap="butt"
+            opacity={1}
+          >
+            {getTooltip && <title>{getTooltip(s.a)}</title>}
+          </line>
+        ))}
+      </g>
+    );
+  }
+
+  // Dot fallback (small N, or no detectable order)
+  const r = adaptiveDotRadius(points.length, baseDotRadius);
+  // Use stroke="none" + lower opacity so overlaps blend instead of stacking
+  // outlines into a noisy mesh. Outline only kicks back in for small N.
+  const showStroke = points.length <= 80;
+  return (
+    <g>
+      {points.map((p, i) => (
+        <circle
+          key={i}
+          cx={toX(p.lng)}
+          cy={toY(p.lat)}
+          r={r}
+          fill={getColor(p)}
+          stroke={showStroke ? '#fff' : 'none'}
+          strokeWidth={showStroke ? 0.5 : 0}
+          opacity={points.length > 200 ? 0.65 : 0.85}
+        >
+          {getTooltip && <title>{getTooltip(p)}</title>}
+        </circle>
+      ))}
+    </g>
+  );
+}
+
+
 // ─── Spatial Scatter Map (points colored by value) ─────────────────────────
 
 interface SpatialScatterMapProps {
-  points: { lat: number; lng: number; value: number; label?: string }[];
+  points: { lat: number; lng: number; value: number; label?: string; filename?: string }[];
   indicatorId?: string;
   /** Shared min/max for color scaling across sibling maps (e.g., per-layer grid). */
   vMin?: number;
@@ -1758,12 +2101,18 @@ export function SpatialScatterMap({ points, indicatorId, vMin: vMinProp, vMax: v
         <text x={svgW / 2} y={svgH - 5} textAnchor="middle" fontSize={10} fill="#718096">Longitude</text>
         <text x={12} y={svgH / 2} textAnchor="middle" fontSize={10} fill="#718096" transform={`rotate(-90, 12, ${svgH / 2})`}>Latitude</text>
         {indicatorId && <text x={svgW / 2} y={14} textAnchor="middle" fontSize={11} fontWeight="bold" fill="#2D3748">{indicatorId}</text>}
-        {/* Points */}
-        {points.map((p, i) => (
-          <circle key={i} cx={toX(p.lng)} cy={toYPos(p.lat)} r={compact ? 3.5 : 5} fill={valColor(p.value)} stroke="#fff" strokeWidth={0.5} opacity={0.85}>
-            <title>{`${p.label || ''} (${p.lat.toFixed(4)}, ${p.lng.toFixed(4)}): ${p.value.toFixed(3)}`}</title>
-          </circle>
-        ))}
+        {/* Points — path heatmap for ≥50 GPS samples with detectable order,
+            adaptive-radius dots otherwise. */}
+        <SpatialMarkerLayer
+          points={points}
+          toX={toX}
+          toY={toYPos}
+          getColor={(p) => valColor(p.value)}
+          getTooltip={(p) =>
+            `${p.label || ''} (${p.lat.toFixed(4)}, ${p.lng.toFixed(4)}): ${p.value.toFixed(3)}`
+          }
+          baseDotRadius={compact ? 3.5 : 5}
+        />
         {/* Legend */}
         <defs>
           <linearGradient id={`spatialGrad-${indicatorId ?? 'default'}`} x1="0" x2="1" y1="0" y2="0">
@@ -1807,7 +2156,10 @@ export function SpatialScatterByLayer({ gpsImages, indicatorId }: SpatialScatter
   // overlaid single-canvas rendering hides every layer except the last drawn —
   // small multiples (one canvas per layer) removes the occlusion entirely.
   const layered = useMemo(() => {
-    type Pt = { lat: number; lng: number; value: number; label: string };
+    // Carry the original filename so SpatialMarkerLayer can detect the path
+    // order. Label still defaults to zone_id when present (more meaningful
+    // tooltip), but is overridden by filename if no zone is set.
+    type Pt = { lat: number; lng: number; value: number; label: string; filename: string };
     const out: Record<string, Pt[]> = { full: [], foreground: [], middleground: [], background: [] };
     for (const l of LAYER_DEFS) {
       const key = l.suffix ? `${indicatorId}${l.suffix}` : indicatorId;
@@ -1817,6 +2169,7 @@ export function SpatialScatterByLayer({ gpsImages, indicatorId }: SpatialScatter
           out[l.key].push({
             lat: img.latitude, lng: img.longitude, value: v,
             label: `${img.zone_id || img.filename}`,
+            filename: img.filename,
           });
         }
       }
@@ -1860,12 +2213,14 @@ export function SpatialScatterByLayer({ gpsImages, indicatorId }: SpatialScatter
                 </text>
                 <line x1={margin.l} y1={margin.t} x2={margin.l} y2={margin.t + plotH} stroke="#CBD5E0" />
                 <line x1={margin.l} y1={margin.t + plotH} x2={margin.l + plotW} y2={margin.t + plotH} stroke="#CBD5E0" />
-                {pts.map((p, i) => (
-                  <circle key={i} cx={toX(p.lng)} cy={toY(p.lat)} r={3.5}
-                    fill={color} stroke="#fff" strokeWidth={0.5} opacity={0.85}>
-                    <title>{`${p.label}: ${p.value.toFixed(3)}`}</title>
-                  </circle>
-                ))}
+                <SpatialMarkerLayer
+                  points={pts}
+                  toX={toX}
+                  toY={toY}
+                  getColor={() => color}
+                  getTooltip={(p) => `${p.label}: ${p.value.toFixed(3)}`}
+                  baseDotRadius={3.5}
+                />
               </svg>
             </Box>
           );
@@ -1893,8 +2248,16 @@ interface ValueSpatialMapProps {
   colorblindMode?: boolean;
 }
 
-function gradientForDirection(t: number, dir: string, colorblindMode = false): string {
-  return directionalColor(t, dir, colorblindMode);
+/** Default value-map gradient. We switched away from the direction-keyed
+ * green / red / blue scheme to MATLAB's **parula** (R2014b+ default) so
+ * the four-layer small-multiples for a single indicator (Full / FG / MG /
+ * BG) all share the same perceptually-uniform sweep — the reader can
+ * compare layers by eye without having to mentally rescale a different
+ * hue range per panel. INCREASE / DECREASE semantics remain available
+ * via the `targetDirection` prop and are surfaced in the legend caption;
+ * the colorblind fallback uses viridis (same trajectory, CB-safe). */
+function gradientForDirection(t: number, _dir: string, colorblindMode = false): string {
+  return parulaColor(t, !!colorblindMode);
 }
 
 export function ValueSpatialMap({
@@ -1903,11 +2266,14 @@ export function ValueSpatialMap({
   const points = useMemo(() => {
     const suffix = LAYER_DEFS.find(l => l.key === layer)?.suffix ?? '';
     const key = suffix ? `${indicatorId}${suffix}` : indicatorId;
-    const pts: { lat: number; lng: number; value: number; label: string }[] = [];
+    // Carry `filename` separately from `label` so SpatialMarkerLayer can
+    // recover the acquisition-order path even when callers want to show a
+    // different tooltip label.
+    const pts: { lat: number; lng: number; value: number; label: string; filename: string }[] = [];
     for (const img of gpsImages) {
       const v = img.metrics_results[key];
       if (v != null && img.latitude != null && img.longitude != null) {
-        pts.push({ lat: img.latitude, lng: img.longitude, value: v, label: img.filename });
+        pts.push({ lat: img.latitude, lng: img.longitude, value: v, label: img.filename, filename: img.filename });
       }
     }
     return pts;
@@ -1941,22 +2307,22 @@ export function ValueSpatialMap({
     <Box>
       <Text fontSize="sm" fontWeight="bold" mb={1}>{indicatorId}</Text>
       <Text fontSize="xs" color="gray.500" mb={1}>
-        Color = indicator value ({layer} layer · {targetDirection.toLowerCase()} = better-darker · range p5–p95)
+        Color = indicator value · MATLAB parula colormap · {layer} layer ·{' '}
+        {targetDirection.toLowerCase()} target · p5–p95 range
       </Text>
       <Box overflowX="auto" bg="gray.50" borderRadius="md" p={1}>
         <svg width={svgW} height={svgH} style={{ fontFamily: 'system-ui, sans-serif', overflow: 'visible' }}>
           <line x1={margin.l} y1={margin.t} x2={margin.l} y2={margin.t + plotH} stroke="#CBD5E0" />
           <line x1={margin.l} y1={margin.t + plotH} x2={margin.l + plotW} y2={margin.t + plotH} stroke="#CBD5E0" />
-          {/* Inlier points (full fill) */}
-          {renderable.map((p, i) => {
-            const t = (p.value - p5) / valRange;
-            return (
-              <circle key={`in-${i}`} cx={toX(p.lng)} cy={toY(p.lat)} r={4.5}
-                fill={gradientForDirection(t, targetDirection, colorblindMode)} stroke="#fff" strokeWidth={0.6} opacity={0.9}>
-                <title>{`${p.label}: ${p.value.toFixed(3)}`}</title>
-              </circle>
-            );
-          })}
+          {/* Inlier points — path heatmap for ≥50 points, adaptive dots for less */}
+          <SpatialMarkerLayer
+            points={renderable}
+            toX={toX}
+            toY={toY}
+            getColor={(p) => gradientForDirection((p.value - p5) / valRange, targetDirection, colorblindMode)}
+            getTooltip={(p) => `${p.label}: ${p.value.toFixed(3)}`}
+            baseDotRadius={4.5}
+          />
           {/* Outlier points (outline only — flagged for inspection) */}
           {bbox.inliers.length > 0 && bbox.outliers.map((p, i) => {
             // Clip outliers to the bbox edges so they still render as a dot,
@@ -2028,6 +2394,10 @@ interface CrossPoint {
   lat: number;
   lng: number;
   label?: string;
+  /** Original UploadedImage.filename — used by SpatialMarkerLayer to recover
+   *  the acquisition order ("123_0_..._right.png" → index 123) so the chart
+   *  can render as a path heatmap instead of overlapping dots. */
+  filename?: string;
   meanAbsZ: number;
   mostDistinctive: string;
 }
@@ -2065,11 +2435,21 @@ function renderCrossScatter(
       <line x1={margin.l} y1={margin.t + plotH} x2={margin.l + plotW} y2={margin.t + plotH} stroke="#CBD5E0" />
       <text x={svgW / 2} y={svgH - 4} textAnchor="middle" fontSize={9} fill="#718096">Longitude</text>
       <text x={12} y={svgH / 2} textAnchor="middle" fontSize={9} fill="#718096" transform={`rotate(-90, 12, ${svgH / 2})`}>Latitude</text>
-      {renderable.map((p, i) => (
-        <circle key={`in-${i}`} cx={toX(p.lng)} cy={toY(p.lat)} r={5.5} fill={getColor(p)} stroke="#fff" strokeWidth={0.8} opacity={0.85}>
-          <title>{`${p.label || ''} (${p.lat.toFixed(4)}, ${p.lng.toFixed(4)}): ${valueFn(p)}`}</title>
-        </circle>
-      ))}
+      <SpatialMarkerLayer
+        points={renderable}
+        toX={toX}
+        toY={toY}
+        getColor={getColor}
+        getTooltip={(p) => `${p.label || ''} (${p.lat.toFixed(4)}, ${p.lng.toFixed(4)}): ${valueFn(p)}`}
+        baseDotRadius={5.5}
+        // Categorical mode (Dominant Indicator) renders as path too: the
+        // colour of each segment is the dominant indicator at that point,
+        // so contiguous runs of a single colour show stretches of road
+        // where one indicator consistently leads. The hard colour
+        // boundaries between adjacent segments are informative —
+        // they pinpoint exactly where the dominant indicator switches.
+      />
+
       {bbox.inliers.length > 0 && bbox.outliers.map((p, i) => {
         const cx = Math.max(margin.l, Math.min(margin.l + plotW, toX(p.lng)));
         const cy = Math.max(margin.t, Math.min(margin.t + plotH, toY(p.lat)));
@@ -2151,6 +2531,7 @@ export function CrossIndicatorSpatialMaps({ gpsImages, indicatorIds, colorblindM
         lat: img.latitude,
         lng: img.longitude,
         label: img.zone_id || img.filename,
+        filename: img.filename,
         meanAbsZ: sumAbsZ / count,
         mostDistinctive: bestInd,
       });
@@ -2388,23 +2769,27 @@ export function ClusterSpatialBeforeAfter({
           <line x1={margin.l} y1={margin.t + plotH} x2={margin.l + plotW} y2={margin.t + plotH} stroke="#CBD5E0" />
           <text x={svgW / 2} y={svgH - 4} textAnchor="middle" fontSize={9} fill="#718096">Longitude</text>
           <text x={12} y={svgH / 2} textAnchor="middle" fontSize={9} fill="#718096" transform={`rotate(-90, 12, ${svgH / 2})`}>Latitude</text>
-          {lats.map((lat, i) => {
-            if (!inBbox(lat, lngs[i])) return null;
-            return (
-              <circle
-                key={i}
-                cx={toX(lngs[i])}
-                cy={toY(lat)}
-                r={3}
-                fill={colorMap[labels[i]] || '#A0AEC0'}
-                opacity={0.7}
-                stroke="#fff"
-                strokeWidth={0.3}
-              >
-                <title>{`Cluster ${labels[i]}${archetypeLabels[labels[i]] ? ': ' + archetypeLabels[labels[i]] : ''}`}</title>
-              </circle>
-            );
-          })}
+          {/* Cluster labels are categorical, not a continuous value sweep, so
+              we deliberately stay in dot mode (path segments would imply a
+              sequential transition between clusters). The dot radius is
+              adaptive on n so the West Lake 1254-point project doesn't
+              produce an opaque smear like the original r=3 rendering did.
+              TODO(if path mode wanted here): pipe `point_filenames` from
+              ClusteringResult so we can do segment rendering coloured by
+              cluster label instead of by index. */}
+          <SpatialMarkerLayer
+            points={lats
+              .map((lat, i) => ({ lat, lng: lngs[i], label: labels[i] }))
+              .filter((p) => inBbox(p.lat, p.lng))}
+            toX={toX}
+            toY={toY}
+            getColor={(p) => colorMap[p.label] || '#A0AEC0'}
+            getTooltip={(p) =>
+              `Cluster ${p.label}${archetypeLabels[p.label] ? ': ' + archetypeLabels[p.label] : ''}`
+            }
+            forceDotMode
+            baseDotRadius={3}
+          />
         </svg>
       </Box>
     );
@@ -2840,7 +3225,7 @@ export function DataQualityTable({ rows }: DataQualityTableProps) {
 
 
 // ═════════════════════════════════════════════════════════════════════════
-// v6.1 — HDBSCAN Cluster Diagnostic Charts (Phase C)
+// v6.1 — Cluster Diagnostic Charts (Phase C)
 // ═════════════════════════════════════════════════════════════════════════
 
 // ─── 1) Cluster Centroid Heatmap (clusters × indicators z-score) ───────────
@@ -2907,18 +3292,33 @@ export function ClusterCentroidHeatmap({
 
         {archetypes.map((a, ri) => {
           const y = headerH + ri * cellH;
+          // v4.x — Defensive label fallback. After a panorama view switch +
+          // cluster re-run, the archetypes array can have entries with
+          // missing/null label or count for a render frame; without the
+          // fallback `.length` and `.toFixed()` on undefined throw and
+          // white-screen the whole Reports page.
+          const labelText = typeof a.archetype_label === 'string' ? a.archetype_label : `Cluster ${a.archetype_id ?? ri}`;
+          const pointCount = typeof a.point_count === 'number' ? a.point_count : 0;
+          // v4.x — Pair archetype_id with the row index. archetype_id is the
+          // natural identifier for the row, but the composite all_sub_clusters
+          // bucket can briefly emit duplicates during a stale render frame, and
+          // duplicate React keys silently drop rows / mis-align centroid colors.
+          // The `${id}-${ri}` form keeps the key human-readable while making it
+          // collision-proof against any upstream re-ID slip.
           return (
-            <g key={a.archetype_id}>
+            <g key={`${a.archetype_id ?? 'na'}-${ri}`}>
               <rect x={0} y={y} width={labelW} height={cellH} fill={ri % 2 ? '#F7FAFC' : '#FFFFFF'} />
               <text x={6} y={y + cellH / 2 + 4} fontSize={10} fontWeight="bold" fill="#2D3748">
-                <title>{`${a.archetype_label} · n=${a.point_count}`}</title>
-                {a.archetype_label.length > 18 ? a.archetype_label.slice(0, 18) + '…' : a.archetype_label}
+                <title>{`${labelText} · n=${pointCount}`}</title>
+                {labelText.length > 18 ? labelText.slice(0, 18) + '…' : labelText}
               </text>
               <text x={labelW - 6} y={y + cellH / 2 + 4} fontSize={9} textAnchor="end" fill="#718096">
-                n={a.point_count}
+                n={pointCount}
               </text>
               {indicators.map((ind, ci) => {
-                const z = a.centroid_z_scores[ind] ?? 0;
+                // Optional chain on the parent dict — a.centroid_z_scores
+                // can be undefined for malformed/stale archetypes.
+                const z = a.centroid_z_scores?.[ind] ?? 0;
                 const cx = labelW + ci * cellW;
                 return (
                   <g key={ind}>
@@ -2931,7 +3331,7 @@ export function ClusterCentroidHeatmap({
                       stroke="#E2E8F0"
                       strokeWidth={0.5}
                     >
-                      <title>{`${a.archetype_label} · ${ind}: z = ${z.toFixed(2)}`}</title>
+                      <title>{`${labelText} · ${ind}: z = ${z.toFixed(2)}`}</title>
                     </rect>
                     <text
                       x={cx + cellW / 2}
@@ -2959,7 +3359,7 @@ export function ClusterCentroidHeatmap({
 }
 
 
-// ─── 2) Per-Point Silhouette Plot (HDBSCAN-aware) ───────────────────────────
+// ─── 2) Per-Point Silhouette Plot ───────────────────────────────────────────
 
 interface SilhouettePerPointPlotProps {
   silhouettePerPoint: (number | null)[];
@@ -3040,7 +3440,12 @@ export function SilhouettePerPointPlot({
           const out = (
             <g key={g.cluster_id}>
               <text x={labelW} y={groupY0 + groupH / 2 + 3} fontSize={10} fontWeight="bold" textAnchor="end" fill="#2D3748">
-                {arch ? (arch.archetype_label.length > 18 ? arch.archetype_label.slice(0, 18) + '…' : arch.archetype_label) : `Cluster ${g.cluster_id}`}
+                {/* v4.x — `arch` may be present but with undefined label
+                    (malformed archetype after view-switch hydration).
+                    Optional-chain on `.length` to avoid white-screen. */}
+                {arch && typeof arch.archetype_label === 'string'
+                  ? (arch.archetype_label.length > 18 ? arch.archetype_label.slice(0, 18) + '…' : arch.archetype_label)
+                  : `Cluster ${g.cluster_id}`}
               </text>
               <text x={labelW} y={groupY0 + groupH / 2 + 16} fontSize={9} textAnchor="end" fill="#718096">
                 n = {g.points.length}
@@ -3070,119 +3475,15 @@ export function SilhouettePerPointPlot({
       <Text fontSize="xs" color="gray.500" mt={2}>
         Each row is a point; bars left of zero indicate the point is closer to
         another cluster (low silhouette → boundary case). Gray bars mark
-        points HDBSCAN flagged as noise before reassignment.
+        points formerly flagged as noise before reassignment.
       </Text>
     </Box>
   );
 }
 
 
-// ─── 3) HDBSCAN Condensed Tree ──────────────────────────────────────────────
+// ─── 3) Condensed Tree (removed) ────────────────────────────────────────────
 
-interface HDBSCANCondensedTreeProps {
-  edges: { parent: number; child: number; lambda_val: number; child_size: number }[];
-  persistence?: Record<string, number>;
-}
-
-export function HDBSCANCondensedTree({ edges, persistence }: HDBSCANCondensedTreeProps) {
-  const { lambdaMax } = useMemo(() => {
-    if (!edges || edges.length === 0) return { lambdaMax: 0 };
-    let lmax = 0;
-    for (const e of edges) lmax = Math.max(lmax, e.lambda_val);
-    return { lambdaMax: lmax };
-  }, [edges]);
-
-  if (!edges || edges.length === 0) {
-    return (
-      <Text fontSize="sm" color="gray.500" fontStyle="italic" p={4}>
-        No condensed tree available (HDBSCAN fallback may have triggered).
-      </Text>
-    );
-  }
-
-  const W = 540;
-  const H = 320;
-  const padX = 50;
-  const padY = 30;
-
-  const childrenByParent = new Map<number, number[]>();
-  edges.forEach(e => {
-    if (!childrenByParent.has(e.parent)) childrenByParent.set(e.parent, []);
-    childrenByParent.get(e.parent)!.push(e.child);
-  });
-  const xPos = new Map<number, number>();
-  const allChildren = new Set(edges.map(e => e.child));
-  const roots = [...new Set(edges.map(e => e.parent))].filter(p => !allChildren.has(p));
-  let leafCounter = 0;
-  const totalLeaves = Math.max(1, edges.length / 2);
-  const layout = (id: number) => {
-    const kids = childrenByParent.get(id) ?? [];
-    if (kids.length === 0) {
-      xPos.set(id, padX + (leafCounter / Math.max(1, totalLeaves)) * (W - 2 * padX));
-      leafCounter++;
-      return;
-    }
-    kids.forEach(layout);
-    const xs = kids.map(k => xPos.get(k) ?? padX);
-    xPos.set(id, xs.reduce((a, b) => a + b, 0) / xs.length);
-  };
-  roots.forEach(layout);
-
-  const yForLambda = (l: number) => padY + (l / Math.max(0.0001, lambdaMax)) * (H - 2 * padY);
-
-  return (
-    <Box overflow="visible">
-      <svg width={W} height={H + 40} style={{ fontFamily: 'system-ui, sans-serif', overflow: 'visible' }}>
-        <line x1={padX - 8} y1={padY} x2={padX - 8} y2={H - padY} stroke="#A0AEC0" />
-        <text x={padX - 12} y={padY - 4} fontSize={10} textAnchor="end" fill="#4A5568">
-          λ = {lambdaMax.toFixed(2)}
-        </text>
-        <text x={padX - 12} y={H - padY + 4} fontSize={10} textAnchor="end" fill="#4A5568">λ = 0</text>
-        <text transform={`translate(14, ${H / 2}) rotate(-90)`} fontSize={10} fill="#4A5568">
-          λ (density threshold)
-        </text>
-
-        {edges.map((e, i) => {
-          const x1 = xPos.get(e.parent) ?? padX;
-          const x2 = xPos.get(e.child) ?? padX;
-          const y1 = yForLambda(0);
-          const y2 = yForLambda(e.lambda_val);
-          const isLeaf = e.child_size > 1;
-          const persistKey = String(e.child);
-          const persist = persistence?.[persistKey];
-          return (
-            <g key={i}>
-              <line
-                x1={x1} y1={y1} x2={x1} y2={y2}
-                stroke={isLeaf ? '#3182CE' : '#CBD5E0'}
-                strokeWidth={Math.max(1, Math.min(8, Math.log2(e.child_size + 1)))}
-                strokeOpacity={0.6}
-              />
-              <line x1={x1} y1={y2} x2={x2} y2={y2} stroke="#A0AEC0" strokeWidth={1} />
-              {isLeaf && (
-                <circle
-                  cx={x2}
-                  cy={y2}
-                  r={Math.max(2, Math.min(6, Math.sqrt(e.child_size)))}
-                  fill={persist && persist > 0.05 ? '#38A169' : '#3182CE'}
-                  fillOpacity={0.85}
-                >
-                  <title>
-                    Cluster #{e.child} · size = {e.child_size}
-                    {persist !== undefined ? ` · persistence = ${persist.toFixed(3)}` : ''}
-                  </title>
-                </circle>
-              )}
-            </g>
-          );
-        })}
-      </svg>
-      <Text fontSize="xs" color="gray.500" mt={2}>
-        Tree from HDBSCAN. Y-axis is λ (inverse density threshold). Branches
-        spanning a wide λ range (long vertical bars) are stable clusters;
-        short/thin slivers were rejected as density noise. Green dots =
-        clusters with persistence &gt; 0.05.
-      </Text>
-    </Box>
-  );
-}
+// The condensed-tree component was removed when GMM-BIC became the clustering
+// method (see clustering_service.py), so the E-series no longer includes a
+// condensed-tree chart.

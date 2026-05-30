@@ -396,25 +396,67 @@ class AnthropicLLM(LLMClient):
 
         def _call():
             client = self._get_client()
-            response = client.messages.create(
+            # Why streaming under the hood:
+            #
+            # The Anthropic SDK refuses non-streaming `messages.create()`
+            # whenever max_tokens is large enough that the request could
+            # theoretically take longer than 10 minutes. Concretely the
+            # error surfaces as:
+            #
+            #   "Streaming is required for operations that may take longer
+            #    than 10 minutes. See https://github.com/anthropics/
+            #    anthropic-sdk-python#long-requests for more details"
+            #
+            # We use `max_tokens=DEFAULT_MAX_OUTPUT_TOKENS` (32K) so that
+            # long AI reports / design strategies don't get silently
+            # truncated mid-section — which means we hit the streaming-
+            # required wall on every report generation, every design
+            # strategy call, and every chart summary the moment Anthropic
+            # is the active provider.
+            #
+            # Fix: call `messages.stream()` internally, accumulate the
+            # text chunks, and return the joined string. The caller's
+            # contract (blocking call → full text back) is preserved, so
+            # ReportService / DesignEngine / ChartSummaryService don't
+            # need to know we changed transport. `get_final_message()`
+            # gives us the same stop_reason / usage info we used to read
+            # off the non-streaming `response` object, so truncation
+            # detection still works.
+            chunks: list[str] = []
+            final_message = None
+            with client.messages.stream(
                 model=self.model,
                 max_tokens=DEFAULT_MAX_OUTPUT_TOKENS,
                 messages=[{"role": "user", "content": prompt}],
-            )
+            ) as stream:
+                for text in stream.text_stream:
+                    if text:
+                        chunks.append(text)
+                # Must be called inside the `with` block (the SDK closes
+                # the underlying HTTP stream on exit). Safe even when the
+                # stream emitted no text — returns a Message with the
+                # error / stop_reason set.
+                try:
+                    final_message = stream.get_final_message()
+                except Exception:
+                    logger.debug("Anthropic get_final_message failed", exc_info=True)
+
             # Capture stop_reason / usage for truncation detection.
             self.last_finish_reason = None
             self.last_truncated = False
             self.last_output_tokens = None
-            try:
-                fr = getattr(response, "stop_reason", None)
-                self.last_finish_reason = fr
-                self.last_truncated = _is_truncated(fr)
-                usage = getattr(response, "usage", None)
-                if usage is not None:
-                    self.last_output_tokens = getattr(usage, "output_tokens", None)
-            except Exception:  # pragma: no cover
-                logger.debug("Anthropic stop-reason capture failed", exc_info=True)
-            return response.content[0].text if response.content else ""
+            if final_message is not None:
+                try:
+                    fr = getattr(final_message, "stop_reason", None)
+                    self.last_finish_reason = fr
+                    self.last_truncated = _is_truncated(fr)
+                    usage = getattr(final_message, "usage", None)
+                    if usage is not None:
+                        self.last_output_tokens = getattr(usage, "output_tokens", None)
+                except Exception:  # pragma: no cover
+                    logger.debug("Anthropic stop-reason capture failed", exc_info=True)
+
+            return "".join(chunks)
 
         return await asyncio.to_thread(_call)
 

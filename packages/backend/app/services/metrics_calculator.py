@@ -170,16 +170,28 @@ class MetricsCalculator:
         indicator_id: str,
         semantic_map_path: str,
         mask_path: str,
+        original_photo_path: Optional[str] = None,
+        depth_map_path: Optional[str] = None,
     ) -> CalculationResult:
         """
         Calculate indicator within a masked spatial layer.
 
+        v8.0 — `original_photo_path` is the path to the unmodified RGB
+        photograph the user uploaded; `semantic_map_path` is the
+        ADE20K-style class colour map. Calculators that need photographic
+        features (Hasler-Süsstrunk colorfulness, HSV saturation, GLCM
+        texture, Canny edges, mean luminance) must read the PHOTO, not the
+        semantic map — otherwise the formula degenerates to a function of
+        the class palette and outputs cluster tightly. The orchestrator
+        now passes both paths; per-calculator dispatch picks whichever it
+        actually needs.
+
         Dispatch priority:
-          1. If the calculator module exposes a custom `calculate_for_layer(
-             semantic_map_path, mask_path)` function, call it directly. This
-             is the contract for TYPE B indicators (entropy / GLCM / depth /
-             color statistics / model composites) whose layer semantics
-             cannot be derived from a simple TARGET_RGB ratio.
+          1. If the calculator module exposes a custom `calculate_for_layer`
+             function, call it. We try the new 3-arg form
+             `(semantic_map_path, mask_path, original_photo_path)` first;
+             if the calculator only accepts 2 args, we fall back to
+             `(semantic_map_path, mask_path)`.
           2. Otherwise, run the default TYPE A pipeline: load TARGET_RGB,
              count matching pixels inside the mask, return
              (target / mask_pixels) * 100.
@@ -198,11 +210,33 @@ class MetricsCalculator:
             # --- (1) Per-calculator custom layer function (TYPE B contract) ---
             custom_fn = getattr(module, "calculate_for_layer", None)
             if callable(custom_fn):
-                try:
-                    result = custom_fn(semantic_map_path, mask_path)
-                except TypeError:
-                    # Some calculators only take semantic_map_path; fall back
-                    result = module.calculate_indicator(semantic_map_path)
+                # Try richer signatures first then degrade. Supported:
+                #   (sem, mask, photo, depth)  — full v8.0
+                #   (sem, mask, photo)         — v8.0 photo-aware
+                #   (sem, mask)                — legacy
+                #   calculate_indicator(sem)   — whole-image fallback
+                result = None
+                if depth_map_path is not None:
+                    try:
+                        result = custom_fn(
+                            semantic_map_path, mask_path,
+                            original_photo_path, depth_map_path,
+                        )
+                    except TypeError:
+                        result = None
+                if result is None and original_photo_path is not None:
+                    try:
+                        result = custom_fn(
+                            semantic_map_path, mask_path, original_photo_path,
+                        )
+                    except TypeError:
+                        result = None
+                if result is None:
+                    try:
+                        result = custom_fn(semantic_map_path, mask_path)
+                    except TypeError:
+                        # Some calculators only take semantic_map_path; fall back
+                        result = module.calculate_indicator(semantic_map_path)
                 if isinstance(result, dict):
                     return CalculationResult(
                         success=result.get("success", False),
@@ -217,6 +251,26 @@ class MetricsCalculator:
                     )
                 # If custom_fn returned a CalculationResult-like object, pass through
                 return result
+
+            # v8.0 — full-image calls reach this branch with mask_path=None
+            # (analysis.py routes both layered and whole-image runs through
+            # calculate_for_layer so photo_path propagation stays in one
+            # place). The default TYPE A pipeline below needs a real mask,
+            # so without one we hand off to the calculator's whole-image
+            # entry point.
+            if not mask_path:
+                result = module.calculate_indicator(semantic_map_path)
+                return CalculationResult(
+                    success=result.get("success", False),
+                    indicator_id=indicator_id,
+                    indicator_name=module.INDICATOR.get("name", ""),
+                    value=result.get("value"),
+                    unit=module.INDICATOR.get("unit", ""),
+                    target_pixels=result.get("target_pixels"),
+                    total_pixels=result.get("total_pixels"),
+                    error=result.get("error"),
+                    image_path=semantic_map_path,
+                )
 
             from PIL import Image
 

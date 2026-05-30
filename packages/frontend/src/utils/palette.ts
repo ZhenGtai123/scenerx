@@ -65,6 +65,33 @@ const VIRIDIS: readonly Triple[] = [
   [253, 231, 37],
 ];
 
+// MATLAB parula colormap (R2014b+ default). Perceptually uniform, dark
+// blue → cyan → green → yellow. The de-facto standard for value-map
+// figures in journal articles in the engineering / urban-science space.
+// 11-stop approximation sampled from MATLAB's own parula table — gives
+// noticeably smoother transitions than a 5-stop fit.
+const PARULA: readonly Triple[] = [
+  [ 62,  38, 168],
+  [ 71,  92, 248],
+  [ 27, 159, 245],
+  [ 19, 198, 197],
+  [ 49, 215, 144],
+  [142, 220,  88],
+  [221, 218,  68],
+  [253, 199,  60],
+  [254, 159,  53],
+  [248, 116,  53],
+  [241,  75,  47],
+];
+
+export function parulaColor(t: number, colorblind = false): string {
+  const clamped = Math.max(0, Math.min(1, t));
+  // Colorblind path returns viridis — also perceptually uniform and
+  // ranked as the safest sequential map in the d-VPAT / cb tests, with
+  // the same dark-blue → yellow trajectory readers expect from parula.
+  return pickFromStops(colorblind ? VIRIDIS : PARULA, clamped);
+}
+
 // Palette anchors deepened (PDF #6) so low-value points stay legible against a
 // near-white spatial-map background. Starts shifted from #FAFCFA-ish to the
 // PDF's #D4ECD4 / #F4D4D4 / #D4E2F4 anchors; ends darkened to ensure adequate

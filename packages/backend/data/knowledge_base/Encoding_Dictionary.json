@@ -95,7 +95,7 @@
           "doi": "10.1080/19475683.2020.1791954",
           "citation": "Kang, Y., Zhang, F., Gao, S., Lin, H., & Liu, Y. (2020). A review of urban physical environment sensing using street view imagery in public health studies. Annals of GIS, 26(3), 261–275.",
           "support_strength": "weak_mention_only",
-          "support_strength_note": "2026-05-10 L3 graded as 提及 only (mentioned but not used/defined)"
+          "support_strength_note": "2026-05-10 L3 graded as 'mentioned' only (mentioned but not used/defined)"
         },
         {
           "paper_file": "Ki, D",
@@ -147,7 +147,7 @@
           "doi": "10.1016/j.landurbplan.2019.103612",
           "citation": "Long, Y., & Ye, Y. (2019). Measuring human-scale urban form and its performance. Landscape and Urban Planning, 191, 103612.",
           "support_strength": "weak_mention_only",
-          "support_strength_note": "2026-05-10 L3 graded as 提及 only (mentioned but not used/defined)"
+          "support_strength_note": "2026-05-10 L3 graded as 'mentioned' only (mentioned but not used/defined)"
         },
         {
           "paper_file": "Lu, Y",
@@ -289,7 +289,7 @@
           "doi": "10.1016/j.jag.2023.103205",
           "citation": "Yin, C., Peng, N., Li, Y., Shi, Y., Yang, S., & Jia, P. (2023). A review on street view observations in support of the sustainable development goals. International Journal of Applied Earth Observation and Geoinformation, 117, 103205.",
           "support_strength": "weak_mention_only",
-          "support_strength_note": "2026-05-10 L3 graded as 提及 only (mentioned but not used/defined)"
+          "support_strength_note": "2026-05-10 L3 graded as 'mentioned' only (mentioned but not used/defined)"
         },
         {
           "paper_file": "Yu, C",
@@ -368,7 +368,7 @@
           "paper_file": "Li",
           "paper_file_review_status": "auto_filled",
           "support_strength": "weak_mention_only",
-          "support_strength_note": "2026-05-10 L3 graded as 提及 only (mentioned but not used/defined)"
+          "support_strength_note": "2026-05-10 L3 graded as 'mentioned' only (mentioned but not used/defined)"
         },
         {
           "doi": "10.1109/AIIIP61647.2023.00012",
@@ -405,7 +405,7 @@
           "paper_file": "Liu",
           "paper_file_review_status": "auto_filled",
           "support_strength": "weak_mention_only",
-          "support_strength_note": "2026-05-10 L3 graded as 提及 only (mentioned but not used/defined)"
+          "support_strength_note": "2026-05-10 L3 graded as 'mentioned' only (mentioned but not used/defined)"
         },
         {
           "doi": "10.47472/KJCK4765",
@@ -723,7 +723,10 @@
         "note": "Observed IOM signatures extend beyond the canonical representational scope; this indicator requires explicit operational-lever annotation."
       },
       "unit": "%",
-      "target_direction": "NEUTRAL"
+      "target_direction": "NEUTRAL",
+      "status": "active",
+      "view_note": "Per-view DIRECTIONAL pixel ratio on the cropped view (left/front/right); NOT the hemispherical view factor its name implies. For a panorama-level estimate, aggregate the three views (area-weighted mean).",
+      "view_scope": "per_view_directional"
     },
     "IND_TVF": {
       "name": "Tree View Factor",
@@ -842,7 +845,10 @@
       },
       "formula_source": "Cai et al., 2023",
       "unit": "ratio (0-1)",
-      "target_direction": "INCREASE"
+      "target_direction": "INCREASE",
+      "status": "active",
+      "view_note": "Per-view DIRECTIONAL pixel ratio on the cropped view (left/front/right); NOT the hemispherical view factor its name implies. For a panorama-level estimate, aggregate the three views (area-weighted mean).",
+      "view_scope": "per_view_directional"
     },
     "IND_BVI": {
       "name": "Building View Index",
@@ -1412,7 +1418,7 @@
     },
     "IND_FNC": {
       "name": "Fence Ratio",
-      "definition": "IND_FNC (Fence Ratio) 属于 Zhang et al. (2021) 提出的 view index (VI) 体系中的物理感知指标之一,定义为街景图中 Fence (栅栏) 类别像素占可视区域像素的比例。论文采用基于 COCO Panoptic Segmentation 训练的 Panoptic-FPN,将每张街景图解析为 17 类主要物理元素,Fence 为其中一类。",
+      "definition": "IND_FNC (Fence Ratio) belongs to the view-index (VI) system of physical-perception indicators proposed by Zhang et al. (2021). It is defined as the proportion of pixels classified as Fence (railings/barriers) within the visible area of a street view image. The paper uses a Panoptic-FPN model trained on COCO Panoptic Segmentation, which parses each street view image into 17 major physical-element categories; Fence is one of them.",
       "category": "CAT_CMP",
       "supporting_papers": [
         {
@@ -1434,7 +1440,7 @@
       "definition_source": "paper_verified",
       "formula": "(Sum(Fence_Pixels) / Sum(Total_Pixels)) × 100",
       "variables": {
-        "Pixels_Fence": "Number of pixels classified as Fence in the street-level image (论文 Table 2 中独立类别)",
+        "Pixels_Fence": "Number of pixels classified as Fence in the street-level image (independent category in Table 2 of the paper)",
         "Pixels_Visible": "Total visible-area pixels of the image as parameterized by Panoptic-FPN"
       },
       "svc_matrix_expansion": {
@@ -1797,7 +1803,7 @@
           "doi": "10.1080/19475683.2020.1791954",
           "citation": "Kang, Y., Zhang, F., Gao, S., Lin, H., & Liu, Y. (2020). A review of urban physical environment sensing using street view imagery in public health studies. Annals of GIS, 26(3), 261–275.",
           "support_strength": "weak_mention_only",
-          "support_strength_note": "2026-05-10 L3 graded as 提及 only (mentioned but not used/defined)"
+          "support_strength_note": "2026-05-10 L3 graded as 'mentioned' only (mentioned but not used/defined)"
         },
         {
           "paper_file": "Fu",
@@ -1970,7 +1976,7 @@
     },
     "IND_DIV": {
       "name": "Diversity Index",
-      "definition": "Diversity / Richness 指标,基于 Shannon 熵的归一化形式 (Pielou evenness),衡量所选景观特征(如 greenery、sky、water、building、ground 等)在图像中的多样性。",
+      "definition": "Diversity / Richness indicator, based on a normalized form of Shannon entropy (Pielou evenness). Measures the diversity of selected landscape features (e.g., greenery, sky, water, building, ground) within an image.",
       "category": "CAT_CFG",
       "supporting_papers": [
         {
@@ -2005,8 +2011,8 @@
       "first_confirmed_by": "Zhao, X., & Lin, G. (2024). Research on the Perception Evaluation of Urban Green Spaces Using Panoramic Images and Deep Learning: A Case Study of Zhujiang Park in Guangzhou. Landscape Architecture Frontiers, 12(6), 007-024.",
       "formula": "H = − Σ_{i=1}^{n} p_i · ln(p_i) / ln(n)",
       "variables": {
-        "H": "Normalized Shannon diversity / richness (Pielou-style evenness 形式)",
-        "p_i": "Proportion of the i-th landscape characteristic (像素占比)",
+        "H": "Normalized Shannon diversity / richness (Pielou-style evenness form)",
+        "p_i": "Proportion of the i-th landscape characteristic (pixel share)",
         "n": "Total number of landscape characteristics"
       },
       "formula_source": "Verma, D., Jana, A., & Ramamritham, K. (2018). Quantifying Urban Surroundings Using Deep Learning Techniques: A New Proposal. Urban Science, 2(3), 78.",
@@ -2252,7 +2258,9 @@
         "note": "Observed IOM signatures extend beyond the canonical representational scope; this indicator requires explicit operational-lever annotation."
       },
       "unit": "ratio (0-1)",
-      "target_direction": "INCREASE"
+      "target_direction": "INCREASE",
+      "status": "future_development",
+      "view_note": "Deferred from indicator recommendation: definition requires an input the per-view street crop does not provide (DSM/building-model simulation, bird-eye/top view, fisheye skydome + sun-path, or a surrounding street network). Per-view value would approximate a different quantity. Retained as a future-development indicator."
     },
     "IND_GIN": {
       "name": "Gini Index",
@@ -2367,7 +2375,7 @@
       ],
       "confirmation_count": 1,
       "category": "CAT_CMP",
-      "definition": "Public-Facility Convenience Index (PCI):街景图中 10 类公共服务设施像素之和与图像总像素的比值,反映街区便民设施基础设施水平。",
+      "definition": "Public-Facility Convenience Index (PCI): the ratio of the sum of pixels from 10 categories of public-service facilities to the total image pixel count in a street view image. Reflects the level of public-amenity infrastructure within a neighborhood.",
       "formula": "PCI = (P_chair + P_toilet + P_bench + P_stool + P_trashcan + P_table + P_armchair + P_light + P_streetlight + P_bulletinboard) / P_all",
       "variables": {
         "P_chair": "Pixels of chair class",
@@ -3034,7 +3042,9 @@
         "note": "Observed IOM signatures extend beyond the canonical representational scope; this indicator requires explicit operational-lever annotation."
       },
       "unit": "ratio (0-1)",
-      "target_direction": "INCREASE"
+      "target_direction": "INCREASE",
+      "status": "future_development",
+      "view_note": "Deferred from indicator recommendation: definition requires an input the per-view street crop does not provide (DSM/building-model simulation, bird-eye/top view, fisheye skydome + sun-path, or a surrounding street network). Per-view value would approximate a different quantity. Retained as a future-development indicator."
     },
     "IND_SVF_DEC": {
       "name": "Sky View Factor Decrease",
@@ -3118,7 +3128,9 @@
         "note": "Observed operational scope stays within the canonical representational scope."
       },
       "unit": "ratio (0-1)",
-      "target_direction": "INCREASE"
+      "target_direction": "INCREASE",
+      "status": "future_development",
+      "view_note": "Deferred from indicator recommendation: definition requires an input the per-view street crop does not provide (DSM/building-model simulation, bird-eye/top view, fisheye skydome + sun-path, or a surrounding street network). Per-view value would approximate a different quantity. Retained as a future-development indicator."
     },
     "IND_BEA_VIS": {
       "name": "Visual Beauty Score",
@@ -3730,7 +3742,9 @@
         "note": "Observed IOM signatures extend beyond the canonical representational scope; this indicator requires explicit operational-lever annotation."
       },
       "unit": "ratio (0-1)",
-      "target_direction": "NEUTRAL"
+      "target_direction": "NEUTRAL",
+      "status": "future_development",
+      "view_note": "Deferred from indicator recommendation: definition requires an input the per-view street crop does not provide (DSM/building-model simulation, bird-eye/top view, fisheye skydome + sun-path, or a surrounding street network). Per-view value would approximate a different quantity. Retained as a future-development indicator."
     },
     "IND_BRT": {
       "name": "Perceived Brightness Score",
@@ -4234,7 +4248,10 @@
         "note": "Observed IOM signatures extend beyond the canonical representational scope; this indicator requires explicit operational-lever annotation."
       },
       "unit": "dimensionless",
-      "target_direction": "INCREASE"
+      "target_direction": "INCREASE",
+      "status": "active",
+      "view_note": "Composite index: a weighted combination of sub-indicators (not a direct image measurement). Retained as recommendable; its output is only as meaningful as the sub-indices that are actually computed.",
+      "view_scope": "composite"
     },
     "IND_VSD": {
       "name": "Vegetation Structural Diversity",
@@ -4326,7 +4343,7 @@
           "paper_file": "Zhang",
           "paper_file_review_status": "auto_filled",
           "support_strength": "weak_mention_only",
-          "support_strength_note": "2026-05-10 L3 graded as 提及 only (mentioned but not used/defined)"
+          "support_strength_note": "2026-05-10 L3 graded as 'mentioned' only (mentioned but not used/defined)"
         },
         {
           "paper_file": "Wang",
@@ -4782,7 +4799,9 @@
         "note": "Observed operational scope stays within the canonical representational scope."
       },
       "unit": "dimensionless [0,1]",
-      "target_direction": "INCREASE"
+      "target_direction": "INCREASE",
+      "status": "future_development",
+      "view_note": "Deferred from indicator recommendation: definition requires an input the per-view street crop does not provide (DSM/building-model simulation, bird-eye/top view, fisheye skydome + sun-path, or a surrounding street network). Per-view value would approximate a different quantity. Retained as a future-development indicator."
     },
     "IND_DIR_RAT": {
       "name": "Dirt Ratio",
@@ -5451,7 +5470,10 @@
       },
       "note_on_generality": "Composite Street Quality Index using paper-specific regression coefficients (1.507, 0.692, 0.447, ..., 7.798, -6.344). These weights are derived from the source authors' specific dataset and city, not universal. To use IND_SQI in a new context, either (a) re-fit weights using the same 12 component indicators with a comparable training sample, or (b) treat as a literature benchmark and develop a context-specific composite.",
       "unit": "dimensionless",
-      "target_direction": "INCREASE"
+      "target_direction": "INCREASE",
+      "status": "active",
+      "view_note": "Composite index: a weighted combination of sub-indicators (not a direct image measurement). Retained as recommendable; its output is only as meaningful as the sub-indices that are actually computed.",
+      "view_scope": "composite"
     },
     "IND_FAC_ENC": {
       "name": "Facade Enclosure Type",
@@ -5717,7 +5739,7 @@
         "alignment_type": "direct",
         "note": "Auto-generated alignment 2026-05-10 L15. Pending operational-lever annotation."
       },
-      "input_data_requirements": "RGB + 语义分割(植被掩膜)+ HSV 转换",
+      "input_data_requirements": "RGB + semantic segmentation (vegetation mask) + HSV conversion",
       "tier": "Tier 1",
       "unit": "ratio (0-1)",
       "target_direction": "INCREASE"
@@ -5814,7 +5836,7 @@
         "alignment_type": "direct",
         "note": "Auto-generated alignment 2026-05-10 L15. Pending operational-lever annotation."
       },
-      "input_data_requirements": "RGB + 语义分割(植被掩膜)",
+      "input_data_requirements": "RGB + semantic segmentation (vegetation mask)",
       "tier": "Tier 1",
       "unit": "dimensionless",
       "target_direction": "NEUTRAL"
@@ -5898,7 +5920,7 @@
         "alignment_type": "direct",
         "note": "Auto-generated alignment 2026-05-10 L15. Pending operational-lever annotation."
       },
-      "input_data_requirements": "RGB(无需分割,基于色彩通道)+ Otsu 自适应阈值",
+      "input_data_requirements": "RGB (no segmentation required, color-channel based) + Otsu adaptive threshold",
       "tier": "Tier 1",
       "unit": "dimensionless",
       "target_direction": "INCREASE"
@@ -5982,7 +6004,7 @@
         "alignment_type": "direct",
         "note": "Auto-generated alignment 2026-05-10 L15. Pending operational-lever annotation."
       },
-      "input_data_requirements": "RGB(归一化色彩通道,无需分割)",
+      "input_data_requirements": "RGB (normalized color channels, no segmentation required)",
       "tier": "Tier 1",
       "unit": "dimensionless",
       "target_direction": "INCREASE"
@@ -6076,7 +6098,7 @@
         "alignment_type": "direct",
         "note": "Auto-generated alignment 2026-05-10 L15. Pending operational-lever annotation."
       },
-      "input_data_requirements": "RGB(三通道亮度均值)",
+      "input_data_requirements": "RGB (mean intensity across the three channels)",
       "tier": "Tier 1",
       "unit": "digital number (0-255)",
       "target_direction": "NEUTRAL"
@@ -6168,7 +6190,7 @@
         "alignment_type": "direct",
         "note": "Auto-generated alignment 2026-05-10 L15. Pending operational-lever annotation."
       },
-      "input_data_requirements": "RGB + 语义分割 + 水平线检测(简单几何或 horizon row 设定)",
+      "input_data_requirements": "RGB + semantic segmentation + horizon detection (simple geometry or fixed horizon-row setting)",
       "tier": "Tier 1",
       "parameters_required": {
         "H": "image height (input data dependent)",
@@ -6266,7 +6288,7 @@
         "alignment_type": "direct",
         "note": "Auto-generated alignment 2026-05-10 L15. Pending operational-lever annotation."
       },
-      "input_data_requirements": "同上(水平线下区域)",
+      "input_data_requirements": "Same as above (region below the horizon)",
       "tier": "Tier 1",
       "parameters_required": {
         "H": "image height (input data dependent)",
@@ -6365,7 +6387,7 @@
         "alignment_type": "direct",
         "note": "Auto-generated alignment 2026-05-10 L15. Pending operational-lever annotation."
       },
-      "input_data_requirements": "RGB + 语义分割(包含 sign/symbol 类)",
+      "input_data_requirements": "RGB + semantic segmentation (including sign/symbol categories)",
       "tier": "Tier 1",
       "note_on_generality": "Original paper (Cai et al. 2023) used DeepLab v3+ trained on CamVid which contains a dedicated sign-symbol class. Generalized variable description allows any segmentation model that produces a sign-symbol-equivalent class.",
       "unit": "ratio (0-1)",
@@ -6463,7 +6485,7 @@
         "alignment_type": "direct",
         "note": "Auto-generated alignment 2026-05-10 L15. Pending operational-lever annotation."
       },
-      "input_data_requirements": "RGB + 语义分割(自然 vs 人工类别清单)",
+      "input_data_requirements": "RGB + semantic segmentation (list of natural vs. artificial categories)",
       "tier": "Tier 1",
       "unit": "dimensionless",
       "target_direction": "NEUTRAL"
@@ -6568,7 +6590,7 @@
         "alignment_type": "direct",
         "note": "Auto-generated alignment 2026-05-10 L15. Pending operational-lever annotation."
       },
-      "input_data_requirements": "RGB + 语义分割(垂直元素 vs 水平元素)",
+      "input_data_requirements": "RGB + semantic segmentation (vertical vs. horizontal elements)",
       "tier": "Tier 1",
       "unit": "dimensionless",
       "target_direction": "NEUTRAL"
@@ -6658,7 +6680,7 @@
         "alignment_type": "direct",
         "note": "Auto-generated alignment 2026-05-10 L15. Pending operational-lever annotation."
       },
-      "input_data_requirements": "RGB + 语义分割(grass/earth/ground/floor)",
+      "input_data_requirements": "RGB + semantic segmentation (grass/earth/ground/floor)",
       "tier": "Tier 1",
       "unit": "ratio (0-1)",
       "target_direction": "NEUTRAL"
@@ -6753,10 +6775,12 @@
         "alignment_type": "direct",
         "note": "Auto-generated alignment 2026-05-10 L15. Pending operational-lever annotation."
       },
-      "input_data_requirements": "RGB + 语义分割(tree/ceiling/canopy)",
+      "input_data_requirements": "RGB + semantic segmentation (tree/ceiling/canopy)",
       "tier": "Tier 1",
       "unit": "degrees",
-      "target_direction": "NEUTRAL"
+      "target_direction": "NEUTRAL",
+      "status": "future_development",
+      "view_note": "Deferred from indicator recommendation: definition requires an input the per-view street crop does not provide (DSM/building-model simulation, bird-eye/top view, fisheye skydome + sun-path, or a surrounding street network). Per-view value would approximate a different quantity. Retained as a future-development indicator."
     },
     "IND_MTD": {
       "name": "Motorization Degree",
@@ -6844,7 +6868,7 @@
         "alignment_type": "direct",
         "note": "Auto-generated alignment 2026-05-10 L15. Pending operational-lever annotation."
       },
-      "input_data_requirements": "RGB + 语义分割(road + 各类机动车类别)",
+      "input_data_requirements": "RGB + semantic segmentation (road + various motor-vehicle categories)",
       "tier": "Tier 1",
       "unit": "ratio (0-1)",
       "target_direction": "NEUTRAL"
@@ -6941,7 +6965,7 @@
         "alignment_type": "direct",
         "note": "Auto-generated alignment 2026-05-10 L15. Pending operational-lever annotation."
       },
-      "input_data_requirements": "RGB + 语义分割(buildings/trees/landmarks)+ 加权和",
+      "input_data_requirements": "RGB + semantic segmentation (buildings/trees/landmarks) + weighted sum",
       "tier": "Tier 1",
       "unit": "ratio (0-1)",
       "target_direction": "NEUTRAL"
@@ -7031,7 +7055,7 @@
         "alignment_type": "direct",
         "note": "Auto-generated alignment 2026-05-10 L15. Pending operational-lever annotation."
       },
-      "input_data_requirements": "RGB + 语义分割(机动车 + motorway 类别)",
+      "input_data_requirements": "RGB + semantic segmentation (motor-vehicle + motorway categories)",
       "tier": "Tier 1",
       "unit": "degrees",
       "target_direction": "NEUTRAL"
@@ -7121,7 +7145,7 @@
         "alignment_type": "direct",
         "note": "Auto-generated alignment 2026-05-10 L15. Pending operational-lever annotation."
       },
-      "input_data_requirements": "RGB + 语义分割(类别检测计数)",
+      "input_data_requirements": "RGB + semantic segmentation (per-category detection counts)",
       "tier": "Tier 1",
       "unit": "ratio (0-1)",
       "target_direction": "NEUTRAL"
@@ -7216,13 +7240,13 @@
         "alignment_type": "direct",
         "note": "Auto-generated alignment 2026-05-10 L15. Pending operational-lever annotation."
       },
-      "input_data_requirements": "RGB + 语义分割(多类别像素计数)",
+      "input_data_requirements": "RGB + semantic segmentation (multi-category pixel counts)",
       "tier": "Tier 1",
       "unit": "dimensionless",
       "target_direction": "NEUTRAL"
     },
     "IND_FG_ERI": {
-      "name": "Foreground Edge Roughness Index (S_ERI)",
+      "name": "S_ERI",
       "definition": "A shape metric describing the irregularity of the foreground outline derived from semantic-segmented street/scenic images, based on the isoperimetric inequality. Compares the perimeter of the foreground region to the square root of its area; values near sqrt(2*pi) indicate circular outlines, values near 1 indicate square outlines, and larger values indicate increasingly irregular shapes.",
       "category": "CAT_CFG",
       "formula": "S_ERI = 0.25 * P / sqrt(A)",
@@ -7310,13 +7334,13 @@
         "alignment_type": "direct",
         "note": "Auto-generated alignment 2026-05-10 L15. Pending operational-lever annotation."
       },
-      "input_data_requirements": "语义分割掩膜(前景对象周长 P 与面积 A)",
+      "input_data_requirements": "Semantic-segmentation mask (foreground-object perimeter P and area A)",
       "tier": "Tier 1",
       "unit": "dimensionless",
       "target_direction": "NEUTRAL"
     },
     "IND_FG_ECI": {
-      "name": "Foreground Edge Contrast Index (S_ECI)",
+      "name": "S_ECI",
       "definition": "Measures how distinct the foreground is from its surrounding elements by checking element-label consistency of the 8-neighborhood for each pixel on the foreground outline. Values near 0 indicate the foreground is sharply distinguished from its surroundings; values near 1 indicate it blends with neighbors.",
       "category": "CAT_CFG",
       "formula": "S_ECI = Pb / (Py + Pb)",
@@ -7404,13 +7428,13 @@
         "alignment_type": "direct",
         "note": "Auto-generated alignment 2026-05-10 L15. Pending operational-lever annotation."
       },
-      "input_data_requirements": "语义分割掩膜(前景边界像素与背景颜色对比)",
+      "input_data_requirements": "Semantic-segmentation mask (foreground-boundary pixels vs. background-color contrast)",
       "tier": "Tier 1",
       "unit": "ratio (0-1)",
       "target_direction": "NEUTRAL"
     },
     "IND_FG_PSI": {
-      "name": "Foreground Hole-Shape Similarity Index (S_PSI)",
+      "name": "S_PSI",
       "definition": "A distributional trend metric describing how similar in shape the multiple holes (open patches inside the foreground) are. Computed as the coefficient of variation of the perimeter-area shape descriptor (0.25*Pi/sqrt(Ai)) across all N holes. Zero means all holes are similar in shape; larger values mean increasingly dissimilar hole shapes.",
       "category": "CAT_CFG",
       "formula": "S_PSI = sqrt( (1/N) * sum_i ( (0.25*Pi/sqrt(Ai)) - mu )^2 ) / mu , where mu = (1/N) sum_i (0.25*Pi/sqrt(Ai))",
@@ -7500,13 +7524,13 @@
         "alignment_type": "direct",
         "note": "Auto-generated alignment 2026-05-10 L15. Pending operational-lever annotation."
       },
-      "input_data_requirements": "语义分割掩膜(前景多个孔洞的形状方差)",
+      "input_data_requirements": "Semantic-segmentation mask (shape variance across multiple foreground holes)",
       "tier": "Tier 1",
       "unit": "dimensionless",
       "target_direction": "NEUTRAL"
     },
     "IND_FG_API": {
-      "name": "Foreground Asymmetry / Profile Index (S_API)",
+      "name": "S_API",
       "definition": "A distributional-trend metric describing the lateral asymmetry of the foreground outline relative to the vertical midline of the field of view, computed as the standard deviation of the per-row midpoints of the foreground outline's left/right pixel pairs about the field-of-view midline. Higher values indicate stronger left/right asymmetry of the foreground silhouette. (Lan et al. 2025, npj Heritage Science, Table 1)",
       "category": "CAT_CFG",
       "formula": "S_API = sqrt( (1/N) * Sum_{i=1..N} (P_i - mu)^2 )",
@@ -7597,13 +7621,13 @@
         "alignment_type": "direct",
         "note": "Auto-generated alignment 2026-05-10 L15. Pending operational-lever annotation."
       },
-      "input_data_requirements": "语义分割掩膜(前景对象周长方差)",
+      "input_data_requirements": "Semantic-segmentation mask (variance of foreground-object perimeters)",
       "tier": "Tier 1",
       "unit": "pixels",
       "target_direction": "NEUTRAL"
     },
     "IND_FG_ADI": {
-      "name": "Foreground Largest-Hole Asymmetry Index (S_ADI)",
+      "name": "S_ADI",
       "definition": "A relative-relationship metric capturing whether one hole inside the foreground dominates the others in size. Equal to (SDi - SDj)/SDi, where SDi is the standard deviation of all hole areas including the largest one and SDj is the standard deviation excluding the largest. Zero indicates the largest hole is similar in size to the rest; one indicates the largest hole dominates.",
       "category": "CAT_CFG",
       "formula": "S_ADI = (SDi - SDj) / SDi ; SDi = sqrt((1/N)*sum_i(Ai - mu_i)^2) ; SDj = sqrt((1/N)*sum_{i!=max}(Ai - mu_w)^2)",
@@ -7695,7 +7719,7 @@
         "alignment_type": "direct",
         "note": "Auto-generated alignment 2026-05-10 L15. Pending operational-lever annotation."
       },
-      "input_data_requirements": "语义分割掩膜(前景最大孔洞 vs 其他孔洞的不对称)",
+      "input_data_requirements": "Semantic-segmentation mask (asymmetry between the largest foreground hole and the other holes)",
       "tier": "Tier 1",
       "unit": "dimensionless",
       "target_direction": "NEUTRAL"
@@ -7785,7 +7809,7 @@
         "alignment_type": "direct",
         "note": "Auto-generated alignment 2026-05-10 L15. Pending operational-lever annotation."
       },
-      "input_data_requirements": "灰度图 + GLCM 共生矩阵",
+      "input_data_requirements": "Grayscale image + GLCM (Gray-Level Co-occurrence Matrix)",
       "tier": "Tier 1",
       "unit": "dimensionless",
       "target_direction": "NEUTRAL"
@@ -7875,7 +7899,7 @@
         "alignment_type": "direct",
         "note": "Auto-generated alignment 2026-05-10 L15. Pending operational-lever annotation."
       },
-      "input_data_requirements": "灰度图 + Canny 边缘检测",
+      "input_data_requirements": "Grayscale image + Canny edge detection",
       "tier": "Tier 1",
       "unit": "dimensionless",
       "target_direction": "NEUTRAL"
@@ -7964,7 +7988,7 @@
         "alignment_type": "direct",
         "note": "Auto-generated alignment 2026-05-10 L15. Pending operational-lever annotation."
       },
-      "input_data_requirements": "全景图(球面/鱼眼投影)+ 按天顶角分带 + 语义分割",
+      "input_data_requirements": "Panoramic image (spherical / fisheye projection) + banding by zenith angle + semantic segmentation",
       "tier": "Tier 2",
       "note_on_generality": "Sakamoto et al. (2023) used 5 latitude bands and Cityscapes-trained segmentation. Generalized to any number of bands and any urban segmentation labelset.",
       "note_on_band_choice": "Sakamoto et al. (2023) used 5 bands at boundaries (0, 22.5, 45, 67.5, 90)°. The number of bands and their boundaries should be set based on the analytical question (e.g., distinguishing low ground vegetation from high tree canopies). Common choices: 5 bands as in Sakamoto, or 3 bands (lower/middle/upper hemisphere).",
@@ -8056,7 +8080,7 @@
         "alignment_type": "direct",
         "note": "Auto-generated alignment 2026-05-10 L15. Pending operational-lever annotation."
       },
-      "input_data_requirements": "4 方向(E/W/N/S)透视图 + 各自 GVI",
+      "input_data_requirements": "Four-direction (E/W/N/S) perspective images + per-direction GVI",
       "tier": "Tier 2",
       "unit": "vector (dimensionless components)",
       "target_direction": "INCREASE"
@@ -8146,13 +8170,13 @@
         "alignment_type": "direct",
         "note": "Auto-generated alignment 2026-05-10 L15. Pending operational-lever annotation."
       },
-      "input_data_requirements": "深度图 D(i,j)(单目深度估计网络输出,如 MiDaS/DPT)",
+      "input_data_requirements": "Depth map D(i,j) (monocular depth-estimation network output, e.g., MiDaS / DPT)",
       "tier": "Tier 3",
       "unit": "dimensionless (relative depth)",
       "target_direction": "NEUTRAL"
     },
     "IND_FG_DEPTH_LV": {
-      "name": "Foreground Maximum Depth Value (P_LV)",
+      "name": "P_LV",
       "definition": "An absolute-value position metric: the maximum depth value across all pixels in the foreground, derived from monocular depth estimation grayscale (1-256). High values mean the foreground starts close to the observer; low values mean the foreground starts far from the observer.",
       "category": "CAT_CFG",
       "formula": "P_LV = max_{i in Foreground} Di",
@@ -8239,13 +8263,13 @@
         "alignment_type": "direct",
         "note": "Auto-generated alignment 2026-05-10 L15. Pending operational-lever annotation."
       },
-      "input_data_requirements": "深度图 + 前景语义掩膜(取前景区域的最大深度值)",
+      "input_data_requirements": "Depth map + foreground semantic mask (take the maximum depth value over the foreground region)",
       "tier": "Tier 3",
       "unit": "depth value (1-256, dimensionless)",
       "target_direction": "NEUTRAL"
     },
     "IND_FG_DEPTH_LN": {
-      "name": "Foreground Vertical Depth Length (P_LN)",
+      "name": "P_LN",
       "definition": "An absolute-value position metric: the count of unique non-repeating depth values among pixels in the foreground, representing the vertical depth extent (range) of the foreground.",
       "category": "CAT_CFG",
       "formula": "P_LN = sum_{i=1..N} Unique(Di)",
@@ -8334,13 +8358,13 @@
         "alignment_type": "direct",
         "note": "Auto-generated alignment 2026-05-10 L15. Pending operational-lever annotation."
       },
-      "input_data_requirements": "深度图 + 前景语义掩膜(前景独立深度切片数)",
+      "input_data_requirements": "Depth map + foreground semantic mask (number of independent depth slices in the foreground)",
       "tier": "Tier 3",
       "unit": "count",
       "target_direction": "NEUTRAL"
     },
     "IND_FG_DEPTH_ECI": {
-      "name": "Foreground Depth Continuity Index (P_ECI)",
+      "name": "P_ECI",
       "definition": "A distributional trend metric measuring how smoothly depth values transition across the foreground. Computed as the coefficient of variation of the per-row/column coefficients of variation of the absolute differences between depth values of neighboring-pixel pairs. Zero means depth values are continuously consistent; larger values mean abrupt depth jumps.",
       "category": "CAT_CFG",
       "formula": "P_ECI = sqrt( (1/N) * sum_j (CV_j - mu_CV)^2 ) / mu_CV ; CV_j = sqrt((1/Mj)*sum_i(Cij - mu_j)^2) / mu_j ; Cij = |idx_i - idx_{i+1}|",
@@ -8432,7 +8456,7 @@
         "alignment_type": "direct",
         "note": "Auto-generated alignment 2026-05-10 L15. Pending operational-lever annotation."
       },
-      "input_data_requirements": "深度图 + 前景语义掩膜(前景深度连续性的方差)",
+      "input_data_requirements": "Depth map + foreground semantic mask (variance of foreground depth continuity)",
       "tier": "Tier 3",
       "unit": "dimensionless",
       "target_direction": "NEUTRAL"

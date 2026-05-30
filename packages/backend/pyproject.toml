@@ -31,7 +31,6 @@ dependencies = [
     "openpyxl>=3.1.0",
     "scipy>=1.11.0",
     "scikit-learn>=1.3.0",
-    "hdbscan>=0.8.33",
     # Image processing
     "opencv-python-headless>=4.9.0",
     "pillow>=10.2.0",

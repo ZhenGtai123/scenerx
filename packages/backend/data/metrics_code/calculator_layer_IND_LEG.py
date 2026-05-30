@@ -272,32 +272,35 @@ if __name__ == "__main__":
 # =============================================================================
 # LAYER-AWARE CALCULATION (auto-added 2026-05-11)
 # =============================================================================
-def calculate_for_layer(semantic_map_path, mask_path=None):
-    """Layer-aware wrapper. If mask_path provided, masks the semantic map
-    to that layer before computing; else computes whole-image.
-    
-    The default strategy: copy semantic map, set non-mask pixels to 0
-    (which won't match any real ADE20K color), then run calculate_indicator.
+def calculate_for_layer(semantic_map_path, mask_path=None, original_photo_path=None):
+    """Layer-aware wrapper (v8.0 — photo-aware).
+
+    Earlier versions masked the SEMANTIC MAP and ran Laplacian/edge stats
+    on that, which made every image's "legibility" equal to a function of
+    the semantic palette boundaries — completely insensitive to the actual
+    photographic edge complexity. We now mask the ORIGINAL PHOTO when
+    supplied so the Laplacian variance / gray std are computed on real
+    photographic structure.
     """
     import numpy as np
     from PIL import Image
     import tempfile, os
-    
+
+    src_path = original_photo_path or semantic_map_path
     if not mask_path or not os.path.exists(mask_path):
-        return calculate_indicator(semantic_map_path)
-    
+        return calculate_indicator(src_path)
+
     try:
-        sem_img = Image.open(semantic_map_path).convert('RGB')
-        sem_arr = np.array(sem_img)
+        with Image.open(src_path) as src_img:
+            src_arr = np.array(src_img.convert("RGB"))
         with Image.open(mask_path) as m:
-            m = m.convert('L')
-            if m.size != (sem_arr.shape[1], sem_arr.shape[0]):
-                m = m.resize((sem_arr.shape[1], sem_arr.shape[0]), Image.NEAREST)
+            m = m.convert("L")
+            if m.size != (src_arr.shape[1], src_arr.shape[0]):
+                m = m.resize((src_arr.shape[1], src_arr.shape[0]), Image.NEAREST)
             mask_arr = np.array(m) > 127
-        # Apply mask: non-mask pixels set to black (0,0,0)
-        sem_arr[~mask_arr] = 0
-        with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp:
-            Image.fromarray(sem_arr).save(tmp.name)
+        src_arr[~mask_arr] = 0
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
+            Image.fromarray(src_arr).save(tmp.name)
             tmp_path = tmp.name
         try:
             result = calculate_indicator(tmp_path)
@@ -306,4 +309,5 @@ def calculate_for_layer(semantic_map_path, mask_path=None):
             except: pass
         return result
     except Exception as e:
-        return {'success': False, 'value': None, 'error': f'layer-aware wrapper failed: {e}'}
+        return {"success": False, "value": None,
+                "error": f"layer-aware wrapper failed: {e}"}

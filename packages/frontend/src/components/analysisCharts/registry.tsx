@@ -32,10 +32,9 @@ import {
   // v4 / Phase 2
   WithinZoneImageDistribution,
   IndicatorValueMapWithToggle,
-  // v6.1 — HDBSCAN cluster diagnostic charts
+  // v6.1 — cluster diagnostic charts
   ClusterCentroidHeatmap,
   SilhouettePerPointPlot,
-  HDBSCANCondensedTree,
 } from '../AnalysisCharts';
 import { ResponsiveSmallMultiples } from './ResponsiveSmallMultiples';
 import type { ChartContext } from './ChartContext';
@@ -105,6 +104,17 @@ export interface SectionMeta {
   /** v4 / Module 4: dynamic data-level badge shown next to the section title.
    * Returns the badge text given the current grouping mode. */
   dataLevelByMode?: (mode: 'zones' | 'clusters') => string;
+  /** v4.x — Dynamic section title that adapts to grouping mode. When the
+   * active view shows clusters (clusters / all_sub_clusters / within_zone:*),
+   * a section labelled "Zone-Level Findings" misleads the user into thinking
+   * the rows are zones. Sections that overload "zone" semantics provide a
+   * mode-aware title here; SectionHeading + Reports.tsx prefer this over
+   * `title` when present. */
+  titleByMode?: (mode: 'zones' | 'clusters') => string;
+  /** v4.x — Dynamic subtitle that mirrors titleByMode. Same rationale: the
+   * literal word "zone" in the subtitle is misleading on cluster-derived
+   * views. */
+  subtitleByMode?: (mode: 'zones' | 'clusters') => string;
 }
 
 export const SECTION_META: Record<ChartSection, SectionMeta> = {
@@ -119,6 +129,14 @@ export const SECTION_META: Record<ChartSection, SectionMeta> = {
     title: 'Zone-Level Findings',
     subtitle:
       'Where do zones differ? Cross-zone z-score ranking, indicator decomposition, layer profile, and geographic deviation.',
+    titleByMode: (mode) =>
+      mode === 'clusters'
+        ? 'Cluster-Level Findings'
+        : 'Zone-Level Findings',
+    subtitleByMode: (mode) =>
+      mode === 'clusters'
+        ? 'Where do clusters differ? Cross-cluster z-score ranking, indicator decomposition, layer profile, and geographic deviation.'
+        : 'Where do zones differ? Cross-zone z-score ranking, indicator decomposition, layer profile, and geographic deviation.',
     dataLevelByMode: (mode) =>
       mode === 'clusters'
         ? 'Cluster-as-zone (N = K clusters)'
@@ -157,7 +175,8 @@ export interface ChartDescriptor {
   /** Human-readable title shown in Card header + picker checkbox */
   title: string;
   /** Optional registry code rendered as a Badge next to the title.
-   * v4: unified scheme A1/A2 · B1–B4 · C1–C4 · D1–D3 (legacy M1–M4 retired). */
+   * v4: unified scheme A1/A2 · B1–B4 · C1–C4 · D1–D3 plus E1–E7
+   * when cluster diagnostics are available (legacy M1–M4 retired). */
   refCode?: string;
   /** Which tab this chart renders in */
   tab: ChartTab;
@@ -251,7 +270,7 @@ function correlationByLayer(ctx: ChartContext) {
 const LAYERS_FOR_PAYLOAD = ['full', 'foreground', 'middleground', 'background'];
 
 // ---------------------------------------------------------------------------
-// Registry (v4 / Module 5 — order = render order; refCodes A1/A2 · B1–B4 · C1–C4 · D1–D3)
+// Registry (v4 / Module 5 — order = render order; refCodes A1/A2 · B1–B4 · C1–C4 · D1–D3 · E1–E7)
 // ---------------------------------------------------------------------------
 //
 // v4 changes (Phase 1):
@@ -1176,14 +1195,15 @@ export const CHART_REGISTRY: ChartDescriptor[] = [
   },
 
   // ── Section E · Cluster Diagnostics ──────────────────────────────────
-  // v6.1 — HDBSCAN replaced KMeans + silhouette-K-search. The four charts
-  // below cover algorithm interpretation (centroid heatmap), geographic
-  // validation (spatial map — already exists as ClusterSpatialBeforeAfter),
-  // quality assessment (per-point silhouette), and HDBSCAN's own algorithm-
-  // specific diagnostic (condensed tree).
+  // v6.2 — GMM-BIC clustering (replaced the earlier KMeans+silhouette-K and
+  // density-based approaches). The charts below cover algorithm interpretation
+  // (centroid heatmap), geographic validation (spatial map — already exists
+  // as ClusterSpatialBeforeAfter), and quality assessment (per-point
+  // silhouette + silhouette-score curve).
   {
     id: 'cluster-centroid-heatmap',
     title: 'Cluster Centroid Heatmap',
+    refCode: 'E1',
     tab: 'analysis',
     section: 'clustering',
     description:
@@ -1192,6 +1212,27 @@ export const CHART_REGISTRY: ChartDescriptor[] = [
     isAvailable: (ctx) =>
       !!ctx.effectiveClustering &&
       ctx.effectiveClustering.archetype_profiles.length > 0,
+    summaryPayload: (ctx) => {
+      const cl = ctx.effectiveClustering;
+      if (!cl) return null;
+      // Per cluster: top-3 most positive z indicators + top-3 most negative.
+      const profiles = cl.archetype_profiles.map((a) => {
+        const entries = Object.entries(a.centroid_z_scores ?? {});
+        const sorted = [...entries].sort((x, y) => y[1] - x[1]);
+        return {
+          archetype_id: a.archetype_id,
+          archetype_label: a.archetype_label,
+          point_count: a.point_count,
+          top3_high: sorted.slice(0, 3).map(([k, v]) => ({ indicator: k, z: Number(v.toFixed(2)) })),
+          top3_low:  sorted.slice(-3).map(([k, v]) => ({ indicator: k, z: Number(v.toFixed(2)) })),
+        };
+      });
+      return {
+        analysis_mode: ctx.analysisMode,
+        n_clusters: cl.archetype_profiles.length,
+        profiles,
+      };
+    },
     render: (ctx) => (
       <ClusterCentroidHeatmap archetypes={ctx.effectiveClustering!.archetype_profiles} />
     ),
@@ -1199,6 +1240,7 @@ export const CHART_REGISTRY: ChartDescriptor[] = [
   {
     id: 'silhouette-per-point',
     title: 'Per-Point Silhouette Plot',
+    refCode: 'E2',
     tab: 'analysis',
     section: 'clustering',
     description:
@@ -1207,6 +1249,42 @@ export const CHART_REGISTRY: ChartDescriptor[] = [
     isAvailable: (ctx) =>
       !!ctx.effectiveClustering?.silhouette_per_point &&
       ctx.effectiveClustering.silhouette_per_point.length > 0,
+    summaryPayload: (ctx) => {
+      const cl = ctx.effectiveClustering;
+      if (!cl?.silhouette_per_point) return null;
+      const sils = cl.silhouette_per_point;
+      const labels = cl.labels_smoothed ?? [];
+      const byCluster = new Map<number, number[]>();
+      for (let i = 0; i < sils.length; i++) {
+        const s = sils[i];
+        if (s == null) continue;
+        const c = labels[i] ?? -1;
+        if (c < 0) continue;
+        const list = byCluster.get(c) ?? [];
+        list.push(s);
+        byCluster.set(c, list);
+      }
+      const perCluster = Array.from(byCluster.entries()).map(([cid, vals]) => {
+        const mean = vals.reduce((a, b) => a + b, 0) / vals.length;
+        const nNeg = vals.filter((v) => v < 0).length;
+        return {
+          cluster_id: cid,
+          n: vals.length,
+          mean_silhouette: Number(mean.toFixed(3)),
+          pct_negative: Number((100 * nNeg / vals.length).toFixed(1)),
+        };
+      }).sort((a, b) => a.cluster_id - b.cluster_id);
+      const finiteSils = sils.filter((v): v is number => v != null);
+      const overall = finiteSils.length
+        ? Number((finiteSils.reduce((a, b) => a + b, 0) / finiteSils.length).toFixed(3))
+        : 0;
+      return {
+        analysis_mode: ctx.analysisMode,
+        n_points: sils.length,
+        overall_mean_silhouette: overall,
+        per_cluster: perCluster,
+      };
+    },
     render: (ctx) => {
       const cl = ctx.effectiveClustering!;
       return (
@@ -1221,34 +1299,33 @@ export const CHART_REGISTRY: ChartDescriptor[] = [
     },
   },
   {
-    id: 'hdbscan-condensed-tree',
-    title: 'HDBSCAN Condensed Tree',
-    tab: 'analysis',
-    section: 'clustering',
-    description:
-      'Density-stability tree. Long vertical branches = stable clusters; short slivers = rejected density noise.',
-    viableInModes: ['cluster'],
-    isAvailable: (ctx) =>
-      !!ctx.effectiveClustering?.condensed_tree &&
-      ctx.effectiveClustering.condensed_tree.length > 0,
-    render: (ctx) => (
-      <HDBSCANCondensedTree
-        edges={ctx.effectiveClustering!.condensed_tree ?? []}
-        persistence={ctx.effectiveClustering!.cluster_persistence}
-      />
-    ),
-  },
-  {
     id: 'silhouette-curve',
     title: 'Silhouette Score Curve (KMeans last-resort fallback)',
+    refCode: 'E3',
     tab: 'analysis',
     section: 'clustering',
     description:
-      'Per-K silhouette curve from the KMeans last-resort fallback. The presence of this chart means HDBSCAN (density-based) and GMM (BIC-selected) both failed to find ≥2 clusters on this data, so the service swept K=2..max_k with KMeans. The selected K uses a multi-criterion vote across silhouette + Davies-Bouldin + Calinski-Harabasz — NOT just the silhouette peak — so a low-K silhouette winner can be overridden by other criteria. Silhouette interpretation: ≥0.5 strong cluster separation, 0.25-0.5 weak/overlapping, ≤0.25 essentially no structure. If silhouette is ≤0.25 across all K, the data genuinely has no rich cluster structure and K=2 (or even reporting "no clustering applicable") is the honest answer.',
+      'Per-K silhouette curve from the KMeans last-resort fallback. The presence of this chart means GMM (BIC-selected K) failed to find ≥2 clusters on this data, so the service swept K=2..max_k with KMeans. The selected K uses a multi-criterion vote across silhouette + Davies-Bouldin + Calinski-Harabasz — NOT just the silhouette peak — so a low-K silhouette winner can be overridden by other criteria. Silhouette interpretation: ≥0.5 strong cluster separation, 0.25-0.5 weak/overlapping, ≤0.25 essentially no structure. If silhouette is ≤0.25 across all K, the data genuinely has no rich cluster structure and K=2 (or even reporting "no clustering applicable") is the honest answer.',
     viableInModes: ['cluster'],
     isAvailable: (ctx) =>
       !!ctx.effectiveClustering?.silhouette_scores &&
       ctx.effectiveClustering.silhouette_scores.length > 1,
+    summaryPayload: (ctx) => {
+      const cl = ctx.effectiveClustering;
+      if (!cl?.silhouette_scores) return null;
+      const scores = cl.silhouette_scores.map((s) => ({
+        k: s.k,
+        silhouette: Number((s.silhouette ?? 0).toFixed(3)),
+      }));
+      const sorted = [...scores].sort((a, b) => b.silhouette - a.silhouette);
+      return {
+        analysis_mode: ctx.analysisMode,
+        selected_k: cl.k,
+        peak_k: sorted[0]?.k ?? null,
+        peak_silhouette: sorted[0]?.silhouette ?? null,
+        scores,
+      };
+    },
     render: (ctx) => (
       <SilhouetteCurve
         scores={ctx.effectiveClustering!.silhouette_scores}
@@ -1259,6 +1336,7 @@ export const CHART_REGISTRY: ChartDescriptor[] = [
   {
     id: 'dendrogram',
     title: 'Ward Hierarchical Clustering',
+    refCode: 'E4',
     tab: 'analysis',
     section: 'clustering',
     description: 'Dendrogram from Ward linkage.',
@@ -1266,11 +1344,27 @@ export const CHART_REGISTRY: ChartDescriptor[] = [
     isAvailable: (ctx) =>
       !!ctx.effectiveClustering?.dendrogram_linkage &&
       ctx.effectiveClustering.dendrogram_linkage.length > 0,
+    summaryPayload: (ctx) => {
+      const cl = ctx.effectiveClustering;
+      if (!cl?.dendrogram_linkage) return null;
+      const linkage = cl.dendrogram_linkage;
+      const distances = linkage.map((row) => row[2]);
+      const maxD = distances.length ? Math.max(...distances) : 0;
+      const cutD = 0.7 * maxD;
+      return {
+        analysis_mode: ctx.analysisMode,
+        n_leaves: linkage.length + 1,
+        max_linkage_distance: Number(maxD.toFixed(2)),
+        cut_threshold: Number(cutD.toFixed(2)),
+        n_clusters_at_cut: cl.archetype_profiles.length,
+      };
+    },
     render: (ctx) => <Dendrogram linkage={ctx.effectiveClustering!.dendrogram_linkage} />,
   },
   {
     id: 'cluster-spatial-smoothing',
     title: 'Cluster Spatial Smoothing',
+    refCode: 'E5',
     tab: 'analysis',
     section: 'clustering',
     description: 'Before/after KNN spatial smoothing comparison (needs GPS).',
@@ -1280,6 +1374,22 @@ export const CHART_REGISTRY: ChartDescriptor[] = [
       ctx.effectiveClustering.point_lats.length > 0 &&
       !!ctx.effectiveClustering.labels_raw &&
       ctx.effectiveClustering.labels_raw.length > 0,
+    summaryPayload: (ctx) => {
+      const cl = ctx.effectiveClustering;
+      if (!cl?.labels_raw || !cl.labels_smoothed) return null;
+      const raw = cl.labels_raw;
+      const sm  = cl.labels_smoothed;
+      const n = Math.min(raw.length, sm.length);
+      let changed = 0;
+      for (let i = 0; i < n; i++) if (raw[i] !== sm[i]) changed++;
+      return {
+        analysis_mode: ctx.analysisMode,
+        n_points: n,
+        n_changed: changed,
+        pct_changed: Number((100 * changed / Math.max(1, n)).toFixed(1)),
+        has_gps: (cl.point_lats?.length ?? 0) > 0,
+      };
+    },
     render: (ctx) => {
       const cl = ctx.effectiveClustering!;
       return (
@@ -1298,12 +1408,32 @@ export const CHART_REGISTRY: ChartDescriptor[] = [
   {
     id: 'archetype-radar',
     title: 'Cluster Radar Profiles',
+    refCode: 'E6',
     tab: 'analysis',
     section: 'clustering',
     description: 'z-score radar for each discovered cluster.',
     viableInModes: ['cluster'],
     isAvailable: (ctx) =>
       !!ctx.effectiveClustering && ctx.effectiveClustering.archetype_profiles.length > 0,
+    summaryPayload: (ctx) => {
+      const cl = ctx.effectiveClustering;
+      if (!cl) return null;
+      const profiles = cl.archetype_profiles.map((a) => {
+        const entries = Object.entries(a.centroid_values ?? {});
+        const sorted = [...entries].sort((x, y) => (y[1] as number) - (x[1] as number));
+        return {
+          archetype_id: a.archetype_id,
+          archetype_label: a.archetype_label,
+          point_count: a.point_count,
+          peak_indicators: sorted.slice(0, 3).map(([k, v]) => ({ indicator: k, value: Number((v as number).toFixed(3)) })),
+        };
+      });
+      return {
+        analysis_mode: ctx.analysisMode,
+        n_clusters: cl.archetype_profiles.length,
+        profiles,
+      };
+    },
     render: (ctx) => (
       <ArchetypeRadarChart archetypes={ctx.effectiveClustering!.archetype_profiles} />
     ),
@@ -1311,12 +1441,30 @@ export const CHART_REGISTRY: ChartDescriptor[] = [
   {
     id: 'cluster-size-distribution',
     title: 'Cluster Size Distribution',
+    refCode: 'E7',
     tab: 'analysis',
     section: 'clustering',
     description: 'Point count per cluster.',
     viableInModes: ['cluster'],
     isAvailable: (ctx) =>
       !!ctx.effectiveClustering && ctx.effectiveClustering.archetype_profiles.length > 0,
+    summaryPayload: (ctx) => {
+      const cl = ctx.effectiveClustering;
+      if (!cl) return null;
+      const total = cl.archetype_profiles.reduce((s, a) => s + a.point_count, 0) || 1;
+      const sizes = cl.archetype_profiles.map((a) => ({
+        archetype_id: a.archetype_id,
+        archetype_label: a.archetype_label,
+        count: a.point_count,
+        share_pct: Number((100 * a.point_count / total).toFixed(1)),
+      }));
+      return {
+        analysis_mode: ctx.analysisMode,
+        n_clusters: cl.archetype_profiles.length,
+        total_points: total,
+        sizes,
+      };
+    },
     render: (ctx) => <ClusterSizeChart archetypes={ctx.effectiveClustering!.archetype_profiles} />,
   },
 ];

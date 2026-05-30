@@ -513,40 +513,112 @@ if __name__ == "__main__":
 
 
 # =============================================================================
-# LAYER-AWARE CALCULATION (auto-added 2026-05-11)
+# LAYER-AWARE CALCULATION (v8.0 — photo-aware colorfulness)
 # =============================================================================
-def calculate_for_layer(semantic_map_path, mask_path=None):
-    """Layer-aware wrapper. If mask_path provided, masks the semantic map
-    to that layer before computing; else computes whole-image.
-    
-    The default strategy: copy semantic map, set non-mask pixels to 0
-    (which won't match any real ADE20K color), then run calculate_indicator.
+#
+# v8.0 fix:  The original wrapper called Hasler-Süsstrunk colorfulness on
+# the SEMANTIC MAP (a small palette of ADE20K class colours) rather than the
+# user's PHOTO, so the C term collapsed to a near-constant ~0.18 across
+# every image — every output landed in [1.10, 1.30]. We now read:
+#   * semantic_map_path   → for WI (water pixels) and PR (plant pixels)
+#   * original_photo_path → for C  (colorfulness on the actual photograph)
+#   * mask_path           → restrict both to the spatial layer (FG/MG/BG)
+#
+def calculate_for_layer(semantic_map_path, mask_path=None,
+                        original_photo_path=None):
+    """v8.0 — layer-aware Visual Beauty Score.
+
+    Reads:
+        * semantic_map_path   for WI (water pixels) and PR (plant pixels)
+        * original_photo_path for C  (Hasler-Süsstrunk colourfulness on
+                                       the actual photograph)
+        * mask_path           restricts both to a spatial layer (FG/MG/BG)
+
+    When original_photo_path is None we fall back to the semantic-map
+    colour space (the legacy degenerate behaviour) so older callers keep
+    working — the C term then collapses to ~0.18 and outputs cluster
+    tightly around 1.20, which is exactly the bug we're working around
+    everywhere downstream now.
     """
-    import numpy as np
-    from PIL import Image
-    import tempfile, os
-    
-    if not mask_path or not os.path.exists(mask_path):
-        return calculate_indicator(semantic_map_path)
-    
+    import os
+
     try:
-        sem_img = Image.open(semantic_map_path).convert('RGB')
+        sem_img = Image.open(semantic_map_path).convert("RGB")
         sem_arr = np.array(sem_img)
-        with Image.open(mask_path) as m:
-            m = m.convert('L')
-            if m.size != (sem_arr.shape[1], sem_arr.shape[0]):
-                m = m.resize((sem_arr.shape[1], sem_arr.shape[0]), Image.NEAREST)
-            mask_arr = np.array(m) > 127
-        # Apply mask: non-mask pixels set to black (0,0,0)
-        sem_arr[~mask_arr] = 0
-        with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp:
-            Image.fromarray(sem_arr).save(tmp.name)
-            tmp_path = tmp.name
+        H, W, _ = sem_arr.shape
+
+        if mask_path and os.path.exists(mask_path):
+            with Image.open(mask_path) as m:
+                m = m.convert("L")
+                if m.size != (W, H):
+                    m = m.resize((W, H), Image.NEAREST)
+                mask_arr = np.array(m) > 127
+        else:
+            mask_arr = np.ones((H, W), dtype=bool)
+
         try:
-            result = calculate_indicator(tmp_path)
-        finally:
-            try: os.unlink(tmp_path)
-            except: pass
-        return result
+            from input_layer import semantic_colors  # injected by orchestrator
+        except Exception:
+            semantic_colors = None
+        water_mask = np.zeros((H, W), dtype=bool)
+        plant_mask = np.zeros((H, W), dtype=bool)
+        if semantic_colors:
+            for class_name, rgb in semantic_colors.items():
+                px = np.all(sem_arr == np.array(rgb, dtype=np.uint8), axis=2)
+                if not px.any():
+                    continue
+                if is_water_class(class_name):
+                    water_mask |= px
+                elif is_plant_class(class_name):
+                    plant_mask |= px
+        water_mask &= mask_arr
+        plant_mask &= mask_arr
+        mask_pixels = int(np.sum(mask_arr))
+        if mask_pixels == 0:
+            return {"success": True,
+                    "value": float(INDICATOR["coefficients"]["intercept"]),
+                    "water_index": 0.0, "plant_richness": 0.0, "color_tone": 0.0}
+        wi = float(np.sum(water_mask)) / mask_pixels
+        pr = float(np.sum(plant_mask)) / mask_pixels
+
+        photo_for_color = original_photo_path or semantic_map_path
+        try:
+            photo_img = Image.open(photo_for_color).convert("RGB")
+            if photo_img.size != (W, H):
+                photo_img = photo_img.resize((W, H), Image.BILINEAR)
+            photo_arr = np.array(photo_img)
+        except Exception:
+            photo_arr = sem_arr
+        layer_pixels = photo_arr[mask_arr]
+        if layer_pixels.size == 0:
+            c = 0.0
+        else:
+            R = layer_pixels[:, 0].astype(np.float64)
+            G = layer_pixels[:, 1].astype(np.float64)
+            B = layer_pixels[:, 2].astype(np.float64)
+            rg = R - G
+            yb = 0.5 * (R + G) - B
+            sigma = np.sqrt(np.var(rg) + np.var(yb))
+            mu = np.sqrt(rg.mean() ** 2 + yb.mean() ** 2)
+            c = min(1.0, (sigma + 0.3 * mu) / 100.0)
+
+        coef = INDICATOR["coefficients"]
+        sv = (coef["intercept"]
+              + coef["WI"] * wi
+              + coef["C"] * c
+              + coef["PR"] * pr)
+        return {
+            "success": True,
+            "value": round(float(sv), 4),
+            "water_index": round(wi, 4),
+            "color_tone": round(c, 4),
+            "plant_richness": round(pr, 4),
+            "contribution_WI": round(coef["WI"] * wi, 4),
+            "contribution_C":  round(coef["C"] * c, 4),
+            "contribution_PR": round(coef["PR"] * pr, 4),
+            "target_pixels": mask_pixels,
+            "total_pixels": int(H * W),
+        }
     except Exception as e:
-        return {'success': False, 'value': None, 'error': f'layer-aware wrapper failed: {e}'}
+        return {"success": False, "value": None,
+                "error": f"BEA_VIS layer wrapper failed: {e}"}

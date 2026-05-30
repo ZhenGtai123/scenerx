@@ -96,11 +96,72 @@ class KnowledgeBase:
                 self._evidence_by_subdimension.setdefault(subdimension_id, []).append(record)
 
         # Build context → evidence mapping
+        #
+        # Data shape (current files):
+        #   Transferability_Context.json's `linked_records` point to IOM
+        #   operation IDs (e.g. "I_SVCs_Zhao2024_1"), NOT directly to
+        #   evidence IDs. The evidence linkage lives in
+        #   I_SVCs_Operations.json where each record carries iom_id +
+        #   linked_evidence_id, so going from a context to its applicable
+        #   evidence requires a two-hop join:
+        #
+        #     context.linked_records  →  iom.iom_id  →  iom.linked_evidence_id
+        #                                                       │
+        #                                                       ▼
+        #                                              evidence.evidence_id
+        #
+        # The original implementation expected `linked_records` to already
+        # be evidence IDs (filtered on the `SVCs_P_` prefix) and therefore
+        # built an empty `_context_by_evidence` dict for the current
+        # dataset — which made `compute_transferability` return
+        # overall="unknown" for every evidence record and produced
+        # "0H / 0M / 0L" badges across the entire recommendation list.
+        #
+        # The direct-linkage branch is kept as a fall-through so older KB
+        # dumps that inlined evidence IDs into `linked_records` continue to
+        # work.
+        iom_list = self.iom if isinstance(self.iom, list) else []
+        iom_id_to_evidence_id: dict[str, str] = {}
+        for op in iom_list:
+            if not isinstance(op, dict):
+                continue
+            iom_id = op.get('iom_id', '')
+            evd_id = op.get('linked_evidence_id', '')
+            if iom_id and evd_id:
+                iom_id_to_evidence_id[iom_id] = evd_id
+
         contexts = self.context if isinstance(self.context, list) else []
+        ctx_links_resolved = 0
         for ctx in contexts:
             for rid in ctx.get('linked_records', []):
+                if not isinstance(rid, str):
+                    continue
                 if rid.startswith('SVCs_P_'):
+                    # Legacy/inline form — the linked record IS an evidence ID.
                     self._context_by_evidence[rid] = ctx
+                    ctx_links_resolved += 1
+                elif rid.startswith('I_SVCs_'):
+                    # Current form — two-hop through IOM to resolve the
+                    # evidence ID this context actually applies to.
+                    evd_id = iom_id_to_evidence_id.get(rid)
+                    if evd_id:
+                        self._context_by_evidence[evd_id] = ctx
+                        ctx_links_resolved += 1
+        if contexts and not self._context_by_evidence:
+            # Surface the failure loudly — without this the symptom is
+            # silent and only shows up as "0H/0M/0L" badges in the UI.
+            logger.warning(
+                "KnowledgeBase: loaded %d contexts but none could be linked "
+                "to evidence (iom_records=%d). Transferability will be "
+                "'unknown' for every recommendation.",
+                len(contexts), len(iom_list),
+            )
+        else:
+            logger.info(
+                "KnowledgeBase: linked %d context↔evidence pairs "
+                "(via %d IOM records)",
+                ctx_links_resolved, len(iom_list),
+            )
 
     def get_evidence_by_id(self, evidence_id: str) -> dict | None:
         """Get a single evidence record by its ID (O(1) lookup)."""
@@ -179,7 +240,7 @@ class KnowledgeBase:
                     continue
                 item: dict = {
                     "name": entry.get("name", code),
-                    "definition": entry.get("definition", "")[:200],
+                    "definition": (entry.get("definition") or "")[:200],
                 }
                 if name == "A_indicators":
                     if entry.get("formula"):
@@ -241,7 +302,7 @@ class KnowledgeBase:
                     continue
                 item: dict = {
                     "name": entry.get("name", code),
-                    "definition": entry.get("definition", "")[:200],
+                    "definition": (entry.get("definition") or "")[:200],
                 }
                 if name == "A_indicators":
                     if entry.get("formula"):
@@ -262,6 +323,30 @@ class KnowledgeBase:
     def get_indicator_definitions(self) -> list[dict]:
         """Get indicator definitions from codebook"""
         return self.appendix.get('A_indicators', [])
+
+    def is_recommendable(self, indicator_id: str) -> bool:
+        """Whether an indicator may be offered by the recommender.
+
+        Single source of truth = the codebook (Encoding_Dictionary.json ->
+        A_indicators) `status` field. No hardcoded id list lives in the
+        recommender; eligibility follows the data:
+
+          - present with status 'active' (or no `status` field at all, which
+            defaults to active for backward compatibility) -> recommendable
+          - present with any other status (e.g. 'future_development',
+            'unsupported') -> excluded; kept as a future/manual indicator
+          - absent from the codebook entirely (e.g. legacy/phantom ids like
+            IND_GVI_ANG that linger in evidence but have no canonical
+            definition) -> not recommendable
+
+        Excluding here governs only the evidence-driven recommendation
+        candidate pool; users may still select excluded indicators manually.
+        """
+        indicators = self.appendix.get('A_indicators', {}) if isinstance(self.appendix, dict) else {}
+        entry = indicators.get(indicator_id) if isinstance(indicators, dict) else None
+        if not isinstance(entry, dict):
+            return False
+        return str(entry.get('status', 'active')).strip().lower() == 'active'
 
     def get_performance_dimensions(self) -> list[dict]:
         """Get performance dimensions from codebook"""

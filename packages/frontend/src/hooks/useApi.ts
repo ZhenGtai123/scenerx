@@ -1,6 +1,7 @@
+import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import api from '../api';
-import type { ProjectCreate, ZoneAnalysisRequest, FullAnalysisRequest, ProjectPipelineRequest, ReportRequest, ClusteringRequest, ClusteringByProjectRequest, MergedExportRequest, GroupingMode } from '../types';
+import type { ProjectCreate, ZoneAnalysisRequest, FullAnalysisRequest, ProjectPipelineRequest, ReportRequest, ClusteringRequest, ClusteringByProjectRequest, MergedExportRequest, GroupingMode, RecommendationResponse } from '../types';
 
 // Query keys
 export const queryKeys = {
@@ -280,9 +281,95 @@ export function useAnalyzeProjectImage() {
   });
 }
 
-// Indicator recommendation mutation
+// ---------------------------------------------------------------------------
+// Indicator recommendation — streaming
+// ---------------------------------------------------------------------------
+//
+// Switched from the blocking POST /api/indicators/recommend to the SSE
+// endpoint /api/indicators/recommend/stream so the UI can render real per-
+// stage progress instead of a 2-5 min black box. The backend emits four
+// event types (gemini_client.py:recommend_indicators_stream):
+//
+//   status  — coarse stage transitions ("Retrieving evidence…", "Built N
+//             assessment cards from M evidence records", "LLM is generating
+//             recommendations…")
+//   chunk   — incremental text from the LLM JSON output
+//   result  — final parsed RecommendationResponse
+//   error   — terminal failure
+//
+// We map these onto a 4-stage progress model with rough percent estimates.
+// The LLM-generating stage is the dominant cost (typically 80%+ of wall time)
+// so we let it advance smoothly from 50% → 95% based on streamed char count
+// (capped, since we don't know the exact final length up front).
+//
+// `progress` is attached to the returned mutation object so existing call
+// sites can keep using `mutation.isPending` / `mutation.mutate(...)` and
+// simply read `mutation.progress` for the bar.
+export type RecommendStage =
+  | 'idle'
+  | 'retrieving'
+  | 'cards'
+  | 'generating'
+  | 'done'
+  | 'error';
+
+export interface RecommendProgress {
+  stage: RecommendStage;
+  statusMessage: string;
+  chunkCount: number;
+  chunkChars: number;
+  percent: number; // 0-100
+}
+
+const INITIAL_PROGRESS: RecommendProgress = {
+  stage: 'idle',
+  statusMessage: '',
+  chunkCount: 0,
+  chunkChars: 0,
+  percent: 0,
+};
+
+// Stage → base percent. The generating stage slides 50→95 based on streamed
+// char volume against an expected response size (heuristic, see below).
+const STAGE_BASE_PERCENT: Record<RecommendStage, number> = {
+  idle: 0,
+  retrieving: 10,
+  cards: 35,
+  generating: 50,
+  done: 100,
+  error: 0,
+};
+
+// Rough expected response length in chars. A typical recommendation set
+// (~10 indicators with rationale + relationships + summary) is around
+// 5-8 KB of JSON. We use 6000 as the soft target so the bar fills up
+// gradually without finishing prematurely on shorter responses.
+const EXPECTED_RESPONSE_CHARS = 6000;
+
+function classifyStatusMessage(msg: string): RecommendStage {
+  const m = msg.toLowerCase();
+  if (m.includes('retriev')) return 'retrieving';
+  // Backend emits "Built {n} assessment cards from {m} evidence records"
+  if (m.includes('built') || m.includes('assessment card')) return 'cards';
+  // Backend emits "LLM is generating recommendations…"
+  if (m.includes('llm') || m.includes('generat')) return 'generating';
+  return 'retrieving'; // safe default for any unknown early status
+}
+
 export function useRecommendIndicators() {
-  return useMutation({
+  const queryClient = useQueryClient();
+  const [progress, setProgress] = useState<RecommendProgress>(INITIAL_PROGRESS);
+
+  const mutation = useMutation({
+    // Stage 1 returns a refreshed recommendation set; invalidate the
+    // cached project so the next render picks up the new indicators
+    // instead of showing the stale list (which would otherwise blank
+    // the panel when the user switches an indicator).
+    onSuccess: (_, variables) => {
+      if (variables.project_id) {
+        queryClient.invalidateQueries({ queryKey: queryKeys.project(variables.project_id) });
+      }
+    },
     mutationFn: (request: {
       project_name: string;
       performance_dimensions: string[];
@@ -294,8 +381,123 @@ export function useRecommendIndicators() {
       lcz_type_id?: string;
       age_group_id?: string;
       project_id?: string;
-    }) => api.indicators.recommend(request).then((r) => r.data),
+    }) =>
+      new Promise<RecommendationResponse>((resolve, reject) => {
+        // Reset to a fresh "Starting…" state for every new call. We
+        // initialise at the retrieving stage with a small non-zero percent
+        // so the bar shows movement immediately on click instead of
+        // appearing inert.
+        setProgress({
+          stage: 'retrieving',
+          statusMessage: 'Starting…',
+          chunkCount: 0,
+          chunkChars: 0,
+          percent: 5,
+        });
+
+        let finalResponse: RecommendationResponse | null = null;
+        let terminalError: Error | null = null;
+
+        api.indicators
+          .recommendStream(request, (event) => {
+            if (event.type === 'status') {
+              const msg = event.message || '';
+              const stage = classifyStatusMessage(msg);
+              setProgress((p) => ({
+                ...p,
+                stage,
+                statusMessage: msg,
+                // Snap forward to the new stage's base percent — but never
+                // go backwards if a later message somehow arrives out of
+                // order (Math.max guards against an over-eager status
+                // dropping us back from generating → cards).
+                percent: Math.max(p.percent, STAGE_BASE_PERCENT[stage]),
+              }));
+            } else if (event.type === 'chunk') {
+              const text = event.text || '';
+              setProgress((p) => {
+                const chunkChars = p.chunkChars + text.length;
+                const chunkCount = p.chunkCount + 1;
+                // Sliding generating-stage progress: 50% → 95% based on
+                // streamed chars vs expected response size. Capped at 95%
+                // because the actual completion happens on the `result`
+                // event, not the last `chunk` event — we don't want to
+                // hit 100% and then sit there waiting.
+                const generatePercent = Math.min(
+                  STAGE_BASE_PERCENT.generating +
+                    (chunkChars / EXPECTED_RESPONSE_CHARS) * 45,
+                  95,
+                );
+                return {
+                  ...p,
+                  stage: 'generating',
+                  chunkCount,
+                  chunkChars,
+                  // Don't override the smarter status text the user already
+                  // sees; only update if we're still on the initial
+                  // "Starting…" message.
+                  statusMessage:
+                    p.statusMessage === 'Starting…'
+                      ? 'LLM is generating recommendations…'
+                      : p.statusMessage,
+                  percent: Math.max(p.percent, generatePercent),
+                };
+              });
+            } else if (event.type === 'result') {
+              setProgress((p) => ({
+                ...p,
+                stage: 'done',
+                statusMessage: 'Complete',
+                percent: 100,
+              }));
+              if (event.data) {
+                finalResponse = event.data as RecommendationResponse;
+              } else {
+                terminalError = new Error('Empty result payload');
+              }
+            } else if (event.type === 'error') {
+              const msg = event.message || 'Recommendation failed';
+              setProgress((p) => ({
+                ...p,
+                stage: 'error',
+                statusMessage: msg,
+              }));
+              terminalError = new Error(msg);
+            }
+          })
+          .then(() => {
+            // SSE stream closed cleanly. The terminal event must already
+            // have set either `finalResponse` or `terminalError`. If
+            // neither, the backend dropped the connection before sending a
+            // result — treat that as an error so the caller's onError
+            // fires instead of an indefinite spinner.
+            if (terminalError) {
+              reject(terminalError);
+            } else if (finalResponse) {
+              resolve(finalResponse);
+            } else {
+              reject(
+                new Error(
+                  'Stream closed without a result event (connection dropped?)',
+                ),
+              );
+            }
+          })
+          .catch((err) => {
+            // Network / 5xx / fetch-level error before the SSE body could
+            // emit a structured `error` event. Propagate so onError fires.
+            const msg = err instanceof Error ? err.message : String(err);
+            setProgress((p) => ({
+              ...p,
+              stage: 'error',
+              statusMessage: msg,
+            }));
+            reject(err instanceof Error ? err : new Error(msg));
+          });
+      }),
   });
+
+  return Object.assign(mutation, { progress });
 }
 
 // Auth mutations

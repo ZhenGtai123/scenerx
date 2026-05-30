@@ -166,10 +166,25 @@ class DesignEngine:
             can never break strategy generation itself.
         """
         zone_analysis = request.zone_analysis
+        # v6.2 — honor the requested view. A zone-view payload can still
+        # carry segment_diagnostics: run_clustering_by_project persists the
+        # cluster archetypes at the top level of zone_analysis_result so the
+        # silhouette / dendrogram charts render in zone view too. Unless this
+        # request is explicitly for a cluster-derived view, drop that field
+        # on a local copy so every downstream `segment_diagnostics or
+        # zone_diagnostics` selection (the unit list here, the diagnosis-
+        # context overview, and the result metadata) iterates the user's
+        # real zones — not the cluster archetypes.
+        if request.grouping_mode != "clusters" and zone_analysis.segment_diagnostics:
+            zone_analysis = zone_analysis.model_copy(
+                update={"segment_diagnostics": None}
+            )
         allowed = set(request.allowed_indicator_ids) if request.allowed_indicator_ids else None
         use_llm = request.use_llm and self.llm.check_connection()
 
-        # Prefer segment_diagnostics (from clustering) over zone_diagnostics
+        # Prefer segment_diagnostics (from clustering) over zone_diagnostics.
+        # In zone view segment_diagnostics is None (blanked above), so this
+        # naturally falls through to the user's real zone_diagnostics.
         diagnostics = zone_analysis.zone_diagnostics
         if zone_analysis.segment_diagnostics:
             diagnostics = zone_analysis.segment_diagnostics
@@ -996,9 +1011,24 @@ Generate {min_strategies}-{min(max_strategies, 5)} concrete design strategies (m
         allowed_set = set(allowed_ids)
         for s in result.get("design_strategies", []):
             if "target_indicators" in s:
-                s["target_indicators"] = [i for i in s["target_indicators"] if i in allowed_set]
+                # The LLM occasionally returns a bare string instead of a list;
+                # coerce so we don't iterate characters and silently drop the
+                # strategy at the filter below.
+                ti = s["target_indicators"]
+                if isinstance(ti, str):
+                    ti = [ti]
+                elif not isinstance(ti, list):
+                    ti = []
+                s["target_indicators"] = [i for i in ti if i in allowed_set]
             if "expected_effects" in s:
-                s["expected_effects"] = [e for e in s["expected_effects"] if e.get("indicator") in allowed_set]
+                ee = s["expected_effects"]
+                if not isinstance(ee, list):
+                    ee = []
+                # Guard each entry: a list-of-strings shape would make .get raise.
+                s["expected_effects"] = [
+                    e for e in ee
+                    if isinstance(e, dict) and e.get("indicator") in allowed_set
+                ]
 
         result["design_strategies"] = [
             s for s in result.get("design_strategies", []) if s.get("target_indicators")

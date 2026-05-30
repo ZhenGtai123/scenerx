@@ -52,8 +52,13 @@ def _load_mask(mask_path: Optional[str], target_shape) -> Optional[np.ndarray]:
 
 
 
-def calculate_for_layer(image_path: str, mask_path: Optional[str] = None) -> Dict:
+def calculate_for_layer(image_path: str, mask_path: Optional[str] = None, original_photo_path: Optional[str] = None) -> Dict:
     """Excess Green Index threshold count. ExG = 2G-R-B, Otsu threshold."""
+    # v8.0 — orchestrator passes the original photograph alongside the
+    # semantic map. This is an RGB photometric indicator; the formula
+    # only makes sense on the actual photo, not on the ADE20K palette.
+    if original_photo_path:
+        image_path = original_photo_path
     try:
         img = Image.open(image_path).convert('RGB')
         arr = np.array(img).astype(np.float64) / 255.0

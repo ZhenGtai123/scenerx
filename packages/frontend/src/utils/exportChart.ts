@@ -85,18 +85,69 @@ function triggerDownload(blob: Blob, filename: string) {
 // ─── SVG ─────────────────────────────────────────────────────────────────
 
 /**
- * Serializes the first <svg> inside `node` and downloads it. Adds the xmlns
+ * Serializes the chart <svg> inside `node` and downloads it. Adds the xmlns
  * attribute and an explicit white background <rect> so the file opens
  * cleanly in Illustrator / Inkscape / LaTeX without a transparent backdrop.
  *
- * For Recharts (or any wrapper that renders multiple top-level <svg>), we
- * pick the first one with non-zero dimensions.
+ * Chart cards routinely contain decorative icons (the ⋯ menu trigger,
+ * download arrows, refresh, info, etc. — all rendered by lucide-react as
+ * tiny <svg class="lucide ..." aria-hidden="true">). The previous "first
+ * non-zero" heuristic almost always picked one of those icons instead of
+ * the actual chart, producing 14×14 SVGs that just contained the ellipsis
+ * dots. The selection logic below explicitly excludes any SVG that:
+ *   • carries a "lucide" class, or
+ *   • is marked aria-hidden="true" / role="presentation" / role="img"
+ *     (the standard markers for purely decorative icons), or
+ *   • is a descendant of an interactive control (<button>, role="menu",
+ *     [data-export-ignore]).
+ * Among the remaining candidates it picks the one with the largest
+ * rendered area (width × height) — for a typical chart card this is the
+ * recharts / d3 figure that fills the body of the card.
  */
+function isUiIcon(svg: SVGSVGElement): boolean {
+  if (svg.classList.contains('lucide')) return true;
+  for (const cls of Array.from(svg.classList)) {
+    if (cls.startsWith('lucide-')) return true;
+  }
+  if (svg.getAttribute('aria-hidden') === 'true') return true;
+  const role = svg.getAttribute('role');
+  if (role === 'presentation' || role === 'img') return true;
+  // Walk up the DOM to detect buttons / menus that ship icon SVGs.
+  for (let el: Element | null = svg.parentElement; el; el = el.parentElement) {
+    if (el === svg.ownerDocument?.body) break;
+    const tag = el.tagName.toLowerCase();
+    if (tag === 'button' || tag === 'a') return true;
+    const r = el.getAttribute('role');
+    if (r === 'menu' || r === 'menuitem' || r === 'button' || r === 'toolbar') return true;
+    if (el.hasAttribute('data-export-ignore')) return true;
+  }
+  return false;
+}
+
 export function exportSVG(node: HTMLElement | null | undefined, filename: string) {
   if (!node) throw new Error('No DOM node to export');
-  const svgs = Array.from(node.querySelectorAll('svg'));
-  const svg = svgs.find((s) => s.getBoundingClientRect().width > 0) ?? svgs[0];
-  if (!svg) throw new Error('No <svg> found inside this chart');
+  const allSvgs = Array.from(node.querySelectorAll('svg')) as SVGSVGElement[];
+  // Score each candidate by rendered area; skip UI icons entirely.
+  const ranked = allSvgs
+    .filter((s) => !isUiIcon(s))
+    .map((s) => {
+      const r = s.getBoundingClientRect();
+      return { svg: s, area: r.width * r.height };
+    })
+    .filter((c) => c.area > 0)
+    .sort((a, b) => b.area - a.area);
+  const svg = ranked[0]?.svg;
+  // If nothing made it past the UI-icon filter, this card has no chart SVG —
+  // typically a pure HTML-table chart (indicator-registry-table,
+  // global-stats-table, etc.). We MUST NOT fall back to the largest SVG,
+  // because the largest remaining svg is the ⋯ menu's lucide icon and
+  // exporting it produces the 14×14 ellipsis bug. Surface a clear error so
+  // the user picks CSV/XLSX (the correct format for tables) instead.
+  if (!svg) {
+    throw new Error(
+      'This card renders as an HTML table rather than an SVG chart — pick CSV or XLSX in the menu instead.',
+    );
+  }
 
   const cloned = svg.cloneNode(true) as SVGSVGElement;
   cloned.setAttribute('xmlns', 'http://www.w3.org/2000/svg');

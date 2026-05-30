@@ -42,6 +42,19 @@ print(f" Aggregation: {INDICATOR.get('aggregation', 'absolute_difference')}")
 # CALCULATION FUNCTION
 # =============================================================================
 def calculate_indicator(SVF_t: float, SVF_t_minus_1: float) -> Dict:
+    # v8.0 — graceful skip when called per-image. This is a composite/
+    # aggregator indicator that needs other-indicators or multi-location
+    # input, not a single image. The orchestrator iterates per-image with
+    # image_path strings; without this guard we'd raise AttributeError on
+    # the first .get() call. Downstream composite callers that pass the
+    # correct dict input still execute the formula below.
+    if isinstance(SVF_t, str):
+        return {
+            "success": False,
+            "value": None,
+            "error": "IND_SVF_CHG: composite indicator — call after per-image metrics are computed; cannot evaluate from a single image_path",
+            "skip_reason": "composite_or_aggregator",
+        }
     try:
         svf_current = float(SVF_t)
         svf_prev = float(SVF_t_minus_1)

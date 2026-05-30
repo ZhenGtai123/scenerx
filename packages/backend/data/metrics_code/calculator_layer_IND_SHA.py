@@ -203,11 +203,35 @@ def calculate_indicator(image_path: str,
         pixels = np.array(img)
         h, w, _ = pixels.shape
         total_pixels = h * w
-        
+
         # Step 2: Create sky mask
         sky_mask = np.zeros((h, w), dtype=np.uint8)
         sky_classes_found = {}
-        
+
+        # MetricsCalculator.calculate() invokes us as
+        #   module.calculate_indicator(image_path)
+        # without forwarding semantic_colors, which means the original code
+        # silently fell through to the colour-heuristic branch below. That
+        # heuristic uses
+        #   (b > 150) & (b > r) & (b > g) & ((r+g+b) > 300)
+        # which fails on the project's actual sky colour (cyan
+        # #06E6E6 = RGB(6,230,230)) because `b > g` requires 230 > 230
+        # = False. Every image's sky_mask ended up empty → VF_sky = 0 →
+        # SHA = 1 - 0 = 1.00 for every zone, surfacing in the UI as
+        # "IND_SHA has zero variance across zones (constant 1.00)".
+        #
+        # Fix: when no explicit argument is given, fall back to the
+        # module-level `semantic_colors` dict that MetricsCalculator
+        # injects at module load time (cf. metrics_calculator.py:80) —
+        # this is the same dict IND_GVI and friends consume as a global.
+        # The keyword-based class detection below then picks up "sky"
+        # directly and uses its real RGB instead of the broken heuristic.
+        if semantic_colors is None:
+            try:
+                semantic_colors = globals().get('semantic_colors')  # type: ignore[assignment]
+            except Exception:
+                semantic_colors = None
+
         if semantic_colors:
             # Use provided semantic color configuration
             for class_name, rgb in semantic_colors.items():

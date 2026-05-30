@@ -52,8 +52,14 @@ def _load_mask(mask_path: Optional[str], target_shape) -> Optional[np.ndarray]:
 
 
 
-def calculate_for_layer(image_path: str, mask_path: Optional[str] = None) -> Dict:
+def calculate_for_layer(image_path: str, mask_path: Optional[str] = None, original_photo_path: Optional[str] = None) -> Dict:
     """Mean RGB luminance over the region. Reads the *photo* image, NOT the semantic mask."""
+
+    # v8.0 — the orchestrator now ships the original photo path alongside
+    # the semantic-map path. This calculator computes a photographic
+    # feature, so prefer the photo when available.
+    if original_photo_path:
+        image_path = original_photo_path
     try:
         img = Image.open(image_path).convert('RGB')
         arr = np.array(img).astype(np.float64)

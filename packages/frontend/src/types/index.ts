@@ -79,6 +79,21 @@ export interface Project {
   ai_reports?: Record<string, string | null>;
   ai_report_metas?: Record<string, Record<string, unknown> | null>;
   analysis_results_updated_at?: string | null;
+
+  /** v4.x — Panorama per-view scoping. Subset of ["left", "front", "right"]
+   *  the user has enabled in Vision Analysis. Empty = project is not in
+   *  panorama mode and runs the legacy single-view path unchanged. */
+  active_panorama_views?: string[];
+  /** v4.x — The panorama view the user is currently viewing on the Reports
+   *  page. Backend mirrors `panorama_view_results[active_panorama_view]`
+   *  into the legacy top-level slots so existing components work unchanged
+   *  per-view; switching this field causes the mirror to flip. */
+  active_panorama_view?: string | null;
+  /** v4.x — Per-view full result bucket. Each entry mirrors the legacy
+   *  top-level slot shape ({ zone_analysis_result, ai_reports,
+   *  ai_report_metas, design_strategy_results, analysis_results_updated_at })
+   *  so the Reports segmented control can swap views without recomputing. */
+  panorama_view_results?: Record<string, Record<string, unknown>>;
 }
 
 export interface SpatialZoneCreate {
@@ -122,6 +137,9 @@ export interface ProjectUpdate {
   subdimensions?: string[];
   spatial_zones?: SpatialZoneCreate[];
   spatial_relations?: SpatialRelation[];
+  /** Panorama per-view scoping — see Project for full semantics. */
+  active_panorama_views?: string[];
+  active_panorama_view?: string | null;
 }
 
 // Calculator types
@@ -461,17 +479,17 @@ export interface ClusteringResult {
   labels_smoothed: number[];
   // Ward hierarchical linkage (for dendrogram): [id1, id2, dist, count]
   dendrogram_linkage: number[][];
-  // ── HDBSCAN-specific (v6.1) ──
-  /** Persistence per cluster (HDBSCAN's stability score). Higher = more
-   *  robust under density variation. Map: cluster_id (string) → score. */
+  // ── Legacy density-clustering fields (v6.1, deprecated; empty since v6.2 GMM) ──
+  /** Persistence per cluster (legacy density-stability score). Higher = more
+   *  robust. Map: cluster_id (string) → score. */
   cluster_persistence?: Record<string, number>;
   /** Per-point silhouette coefficient (against final labels). null = noise. */
   silhouette_per_point?: (number | null)[];
-  /** Number of points HDBSCAN labelled as noise before reassignment. */
+  /** Number of points formerly labelled as noise before reassignment (legacy). */
   noise_count?: number;
   /** Original IDs of noise points (for highlighting in spatial map). */
   noise_point_ids?: string[];
-  /** HDBSCAN condensed-tree edges for D3 visualization. */
+  /** Legacy condensed-tree edges (former density-clustering tree visual; unused). */
   condensed_tree?: { parent: number; child: number; lambda_val: number; child_size: number }[];
 }
 
@@ -635,6 +653,10 @@ export interface ProjectPipelineRequest {
   use_llm?: boolean;
   max_ioms_per_query?: number;
   max_strategies_per_zone?: number;
+  /** v4.x — Panorama view scoping. One of "left" / "front" / "right" when
+   *  set; backend aliases that view's prefixed masks to the standard slots
+   *  and writes results into the view's bucket. Omit for non-panorama runs. */
+  panorama_view?: string;
 }
 
 export interface ProjectPipelineProgress {

@@ -73,6 +73,10 @@ def _invalidate_analysis_artefacts(project: ProjectResponse) -> bool:
         or project.design_strategy_results
         or project.ai_report
         or project.ai_reports
+        # v4.x — also invalidate any per-view panorama results we've stashed.
+        # `active_panorama_views` (the user's UI selection) is NOT invalidated:
+        # they still want the same set of views once the pipeline is rerun.
+        or project.panorama_view_results
     )
     project.zone_analysis_result = None
     project.design_strategy_result = None
@@ -81,6 +85,7 @@ def _invalidate_analysis_artefacts(project: ProjectResponse) -> bool:
     project.ai_report_meta = None
     project.ai_reports = {}
     project.ai_report_metas = {}
+    project.panorama_view_results = {}
     return had_artefacts
 
 
@@ -359,6 +364,78 @@ async def update_project(project_id: str, updates: ProjectUpdate, _user: UserRes
             relations.append(relation)
         project.spatial_relations = relations
         del update_data['spatial_relations']
+
+    # v4.x — Panorama view switching. When the caller flips
+    # `active_panorama_view` to a different view, mirror that view's stored
+    # bucket into the legacy top-level slots so the Reports page reads the
+    # right result set without per-component plumbing. If the target view
+    # has no stored bucket yet (pipeline not run for it), clear the legacy
+    # slots — better an empty Reports page than stale results from a
+    # different view masquerading as the current one.
+    if 'active_panorama_view' in update_data:
+        new_view = update_data['active_panorama_view']
+        old_view = project.active_panorama_view
+        if new_view != old_view:
+            # First, snapshot the CURRENT top-level slots back into the old
+            # view's bucket. This catches any in-flight edits (AI report
+            # regenerations, strategy tweaks) that happened against the
+            # legacy slots while the user was looking at old_view.
+            # NOTE: keep `selected_indicators` out of the per-view bucket.
+            # It's a user-level live setting; mirroring it per-view would
+            # silently stomp the user's current pick on every view switch.
+            #
+            # `image_metrics` IS mirrored per-view: each view's pipeline run
+            # produces a different set of img.metrics_results values (because
+            # different masks → different indicator values), and downstream
+            # endpoints (clustering by-project, within-zone clustering,
+            # chart-summary) read img.metrics_results directly. Without
+            # snapshotting + restoring per-view, clustering would always
+            # operate on whatever the LAST pipeline run left behind — the
+            # "Cluster view 跨视角数据相同" bug.
+            if old_view:
+                project.panorama_view_results[old_view] = {
+                    "zone_analysis_result": project.zone_analysis_result,
+                    "ai_reports": dict(project.ai_reports),
+                    "ai_report_metas": dict(project.ai_report_metas),
+                    "design_strategy_results": dict(project.design_strategy_results),
+                    "analysis_results_updated_at": (
+                        project.analysis_results_updated_at.isoformat()
+                        if project.analysis_results_updated_at else None
+                    ),
+                    "image_metrics": {
+                        img.image_id: dict(img.metrics_results)
+                        for img in project.uploaded_images
+                        if img.metrics_results
+                    },
+                }
+            # Then hydrate the new view's bucket into the legacy slots.
+            bucket = project.panorama_view_results.get(new_view) or {}
+            project.zone_analysis_result = bucket.get("zone_analysis_result")
+            project.ai_reports = dict(bucket.get("ai_reports") or {})
+            project.ai_report_metas = dict(bucket.get("ai_report_metas") or {})
+            project.design_strategy_results = dict(bucket.get("design_strategy_results") or {})
+            # Restore per-image metrics from the new view's bucket IF the
+            # bucket carries an `image_metrics` field. Backward-compat: old
+            # buckets persisted before the per-view metrics fix don't have
+            # this field — in that case we LEAVE img.metrics_results alone
+            # rather than wiping it to {} (which would break a subsequent
+            # cluster run with "no data"). The user gets a one-time stale
+            # metrics-for-current-view until they re-run the pipeline for
+            # this view, which populates the new schema. Re-clustering after
+            # a fresh pipeline run produces per-view-correct results.
+            if "image_metrics" in bucket:
+                view_image_metrics = bucket["image_metrics"] or {}
+                for img in project.uploaded_images:
+                    img.metrics_results = dict(view_image_metrics.get(img.image_id) or {})
+            # Parse back the stored isoformat string if present.
+            ts = bucket.get("analysis_results_updated_at")
+            if isinstance(ts, str):
+                try:
+                    project.analysis_results_updated_at = datetime.fromisoformat(ts)
+                except ValueError:
+                    project.analysis_results_updated_at = None
+            else:
+                project.analysis_results_updated_at = None
 
     # Apply remaining simple field updates
     for field, value in update_data.items():

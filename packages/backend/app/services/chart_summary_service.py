@@ -98,8 +98,8 @@ _CHART_TEMPLATE_HINTS: dict[str, str] = {
     "silhouette-curve":
         "\nIMPORTANT LOGIC for this chart:\n"
         "(1) If ANY K→silhouette data points are visible (e.g. K=2→0.45), "
-        "that PROVES HDBSCAN + GMM both failed and KMeans fallback ran. Do "
-        "NOT claim 'chart is empty' or 'HDBSCAN succeeded'.\n"
+        "that PROVES GMM (BIC-selected K) failed to find >=2 clusters and the "
+        "KMeans fallback ran. Do NOT claim 'chart is empty' or 'GMM succeeded'.\n"
         "(2) The selected K is NOT necessarily the silhouette peak — it's a "
         "multi-criterion vote (silhouette + Davies-Bouldin + Calinski-"
         "Harabasz). Check the `is_selected` flag in payload. If silhouette "
@@ -141,10 +141,13 @@ CREATE TABLE IF NOT EXISTS chart_summary_cache (
 
 # Migration columns — added on every connect via PRAGMA-style probe + ALTER.
 # This keeps existing cached entries readable while letting us store v2
-# structured output and a degraded flag.
+# structured output, a degraded flag, and (v4.3) the grouping_mode so
+# callers can filter zone-vs-cluster summaries explicitly instead of
+# reverse-engineering the payload_hash.
 _V2_COLUMNS = [
     ("summary_v2_json", "TEXT"),
-    ("degraded", "INTEGER DEFAULT 0"),
+    ("degraded",        "INTEGER DEFAULT 0"),
+    ("grouping_mode",   "TEXT"),
 ]
 
 
@@ -225,14 +228,15 @@ class ChartSummaryService:
         summary_v2: dict[str, Any] | None,
         model: str,
         degraded: bool,
+        grouping_mode: GroupingMode | None = None,
     ) -> None:
         with self._connect() as conn:
             conn.execute(
                 """INSERT OR REPLACE INTO chart_summary_cache
                    (chart_id, project_id, payload_hash, summary,
                     highlight_points_json, model, created_at,
-                    summary_v2_json, degraded)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    summary_v2_json, degraded, grouping_mode)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     chart_id,
                     project_id,
@@ -243,6 +247,7 @@ class ChartSummaryService:
                     time.time(),
                     json.dumps(summary_v2) if summary_v2 else None,
                     1 if degraded else 0,
+                    (grouping_mode or "zones"),
                 ),
             )
             conn.commit()
@@ -369,6 +374,7 @@ class ChartSummaryService:
             None,
             getattr(self.llm, "model", ""),
             degraded=True,
+            grouping_mode=grouping_mode,
         )
         return {
             "summary": summary,
@@ -582,12 +588,11 @@ def _extract_unit_labels(payload: dict[str, Any]) -> list[str]:
         labels.append(s)
 
     for key in ("zones", "rows"):
-        items = payload.get(key)
-        if not isinstance(items, list):
+        lst = payload.get(key)
+        if not isinstance(lst, list):
             continue
-        for item in items:
-            if not isinstance(item, dict):
-                continue
-            _push(item.get("zone") or item.get("zone_name"))
-
-    return labels[:30]
+        for entry in lst:
+            if isinstance(entry, dict):
+                _push(entry.get("zone"))
+                _push(entry.get("zone_name"))
+    return labels
