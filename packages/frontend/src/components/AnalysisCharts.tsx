@@ -24,7 +24,7 @@ import {
   ReferenceLine,
 } from 'recharts';
 import type { EnrichedZoneStat, ZoneDiagnostic, ArchetypeProfile, UploadedImage, ImageRecord, GlobalIndicatorStats, DataQualityRow, IndicatorDefinitionInput } from '../types';
-import { divergingColor, directionalColor, magnitudeColor, parulaColor } from '../utils/palette';
+import { divergingColor, magnitudeColor, parulaColor } from '../utils/palette';
 
 // Shared color palette for zones
 const ZONE_COLORS = [

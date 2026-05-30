@@ -21,7 +21,7 @@
  */
 
 import { Component, type ErrorInfo, type ReactNode } from 'react';
-import { Alert, AlertIcon, AlertTitle, AlertDescription, Box, Button, HStack, VStack, Code } from '@chakra-ui/react';
+import { Alert, AlertIcon, AlertTitle, AlertDescription, Box, Button, HStack, Code } from '@chakra-ui/react';
 
 interface ErrorBoundaryProps {
   children: ReactNode;

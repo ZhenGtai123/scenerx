@@ -427,7 +427,6 @@ export const useAppStore = create<AppState>()(persist((set, get) => ({
     // so we don't show project A's archetypes on project B.
     const preservedGroupingMode = sameProject ? state.groupingMode : 'zones';
     const preservedUserZone = sameProject ? state.userZoneAnalysisResult : null;
-    const preservedClusterAnalysis = sameProject ? state.clusterAnalysisResult : null;
 
     // Entry-gate picks (Single View / Dual View / Zone-only / Within-zone)
     // are session-only state. Preserve on same-project refetch so the
