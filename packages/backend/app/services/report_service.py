@@ -114,8 +114,8 @@ Reports page). Available refCodes:
   B1 Zone Ranking · B2 Zone × Indicator · B3 Zone Profile Radar · B4 Zone Deviation Map
   C1 Indicator Distribution · C2 Per-Indicator Drill-Down · C3 Within-Zone Image Distribution · C4 Indicator Value Map
   D1 Global Stats · D2 Zone × Indicator Mean Matrix · D3 Indicator Correlation
-  E1 Cluster Centroid Heatmap · E2 Per-Point Silhouette Plot · E3 HDBSCAN Condensed Tree · E4 Silhouette Score Curve
-  E5 Ward Dendrogram · E6 Cluster Spatial Smoothing · E7 Cluster Radar Profiles · E8 Cluster Size Distribution
+  E1 Cluster Centroid Heatmap · E2 Per-Point Silhouette Plot · E3 Silhouette Score Curve · E4 Ward Hierarchical Clustering
+  E5 Cluster Spatial Smoothing · E6 Cluster Radar Profiles · E7 Cluster Size Distribution
 (E-codes are only available when clustering has been run; cite them only
 in cluster-derived reports.)
 You MAY NOT invent refCodes outside this list. Each claim MUST be traceable
@@ -331,10 +331,10 @@ spatial zone in the project setup or run KMeans archetype clustering
      • single-zone, no clustering   → only A1, A2, C1–C4, D1
      • multi-zone, no clustering    → A1–A2, B1–B4, C1–C4, D1–D3
      • single-zone + clustering     → A1–A2, B1–B4 (cluster-derived),
-                                       C1–C4, D1–D3, E1–E8
+                                       C1–C4, D1–D3, E1–E7
      • multi-zone + within-zone     → A1–A2, B1–B4 (sub-zone-derived),
-                                       C1–C4, D1–D3, E1–E8
-   Do not cite refCodes the user can't see. Cluster-only charts (E1–E8)
+                                       C1–C4, D1–D3, E1–E7
+   Do not cite refCodes the user can't see. Cluster-only charts (E1–E7)
    may only be cited when `data_quality_flags.zone_source == 'cluster'`.
 10. **Enumerate every cluster — no shortcuts (CRITICAL)** — The user-facing
    Strategies tab on the Reports page renders one accordion entry per
@@ -938,3 +938,4 @@ class ReportService:
             summary[uid] = unit_data
 
         return json.dumps(summary, ensure_ascii=False, indent=2)
+                

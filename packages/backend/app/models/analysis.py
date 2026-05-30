@@ -191,16 +191,18 @@ class ClusteringResult(BaseModel):
     labels_smoothed: list[int] = Field(default_factory=list)  # labels after KNN smoothing
     # Ward hierarchical clustering linkage matrix (for dendrogram). Rows: [id1, id2, dist, count].
     dendrogram_linkage: list[list[float]] = Field(default_factory=list)
-    # ── HDBSCAN-specific fields (v6.1) ──
-    # Per-cluster persistence (HDBSCAN stability under density variation).
+    # ── Legacy density-clustering fields (v6.1, deprecated) ──
+    # No longer populated since v6.2 (GMM-BIC primary); retained as empty
+    # defaults so old ClusteringResult records still deserialize.
+    # Per-cluster persistence (legacy density-stability score).
     # Higher = more robust cluster. Map: cluster_id (str) → score.
     cluster_persistence: dict[str, float] = Field(default_factory=dict)
     # Per-point silhouette coefficient (against final labels, noise → None).
     silhouette_per_point: list[Optional[float]] = Field(default_factory=list)
-    # Number of points HDBSCAN labelled as noise (-1) before reassignment.
+    # Number of points formerly labelled as noise (-1) before reassignment (legacy).
     noise_count: int = 0
     noise_point_ids: list[str] = Field(default_factory=list)
-    # HDBSCAN condensed-tree edges for D3 visualization.
+    # Legacy condensed-tree edges (former density-clustering tree visual; unused).
     # Each edge: {parent: int, child: int, lambda_val: float, child_size: int}.
     condensed_tree: list[dict] = Field(default_factory=list)
     # ── v6.2 — cluster-validity diagnostics (tendency · gap · stability) ──
@@ -465,6 +467,4 @@ class ProjectPipelineResult(BaseModel):
     calculations_cached: int = 0
     zone_statistics_count: int = 0
     skipped_images: list[SkippedImage] = Field(default_factory=list)
-    zone_analysis: Optional[ZoneAnalysisResult] = None
-    design_strategies: Optional[DesignStrategyResult] = None
-    steps: list[ProjectPipelineProgress] = Field(default_factory=list)
+  

@@ -155,6 +155,56 @@ def _restore_panorama_masks(project, snapshot: dict[str, dict[str, str]]) -> Non
             img.mask_filepaths = original
 
 
+def _mirror_into_active_panorama_bucket(
+    project,
+    slot: str,
+    *,
+    ai_report=None,
+    ai_report_meta=None,
+    design_strategies=None,
+    invalidate_report=False,
+) -> None:
+    """Write freshly-generated per-view outputs straight into the ACTIVE
+    panorama view's bucket at generation time.
+
+    Without this, report/strategy generation only writes the top-level
+    `ai_reports[slot]` / `design_strategy_results[slot]` slots. The active
+    panorama view's bucket stays empty until the user switches AWAY from it
+    (the switch handler snapshots top-level -> bucket). So switching back TO a
+    view whose bucket was never populated hydrates an EMPTY bucket over the
+    top-level slots and erases the report the user just generated.
+
+    Mirroring at generation time makes the bucket authoritative immediately,
+    so a later switch can never clobber it. No-op for non-panorama projects.
+    """
+    apv = getattr(project, "active_panorama_view", None)
+    pvr = getattr(project, "panorama_view_results", None)
+    if not apv or not isinstance(pvr, dict) or apv not in pvr:
+        return
+    bucket = pvr[apv]
+    if not isinstance(bucket, dict):
+        return
+    if ai_report is not None:
+        bucket["ai_reports"] = {**(bucket.get("ai_reports") or {}), slot: ai_report}
+        bucket["ai_report_metas"] = {
+            **(bucket.get("ai_report_metas") or {}),
+            slot: ai_report_meta,
+        }
+    if design_strategies is not None:
+        bucket["design_strategy_results"] = {
+            **(bucket.get("design_strategy_results") or {}),
+            slot: design_strategies,
+        }
+    if invalidate_report:
+        # Stage-3/strategy regen makes the SAME-slot report stale. Mirror the
+        # top-level pop into the bucket so a later switch can't re-hydrate the
+        # stale report.
+        if isinstance(bucket.get("ai_reports"), dict):
+            bucket["ai_reports"].pop(slot, None)
+        if isinstance(bucket.get("ai_report_metas"), dict):
+            bucket["ai_report_metas"].pop(slot, None)
+
+
 def _ensure_per_view_metrics(project) -> tuple[bool, str]:
     """For panorama projects, force `img.metrics_results` to reflect the
     project's `active_panorama_view` by restoring from
@@ -713,14 +763,14 @@ def _build_parent_zone_analysis(
 ) -> Optional[ZoneAnalysisResult]:
     """Build the "parent_zones" view: each parent zone is a single grouping
     unit, aggregating across all of that zone's images (including images that
-    fell into different sub-clusters during HDBSCAN). Used by the multi-zone
+    fell into different sub-clusters during GMM). Used by the multi-zone
     within-zone clustering Reports view to give the user a "here are the N
     parent zones at a glance" perspective before drilling into sub-clusters.
     """
     img_to_unit: dict[str, tuple[str, str]] = {}
     zone_name_by_id = {z.zone_id: (z.zone_name or z.zone_id) for z in project.spatial_zones}
     # Only include images that were actually clustered (skip too-small zones
-    # that didn't run HDBSCAN — those would muddy the parent-zone view since
+    # that didn't run GMM — those would muddy the parent-zone view since
     # their images aren't part of the within-zone analysis at all).
     for zone_id, (clustering, _diags) in cluster_results_by_zone.items():
         zone_name = zone_name_by_id.get(zone_id, zone_id)
@@ -775,7 +825,7 @@ def _build_within_zone_cluster_analysis(
     """Build the "all_sub_clusters" view: every sub-cluster across every
     parent zone treated as a separate grouping unit (NK total).
 
-    For each user zone we already ran HDBSCAN separately and got back a
+    For each user zone we already ran GMM separately and got back a
     ClusteringResult. This helper maps every image to a sub-zone id of the
     form ``{zone_id}__sub{cid}``, then delegates aggregation to the shared
     ``_build_grouped_zone_analysis``.
@@ -807,7 +857,7 @@ def run_clustering_within_zones(
     analyzer: ZoneAnalyzer = Depends(get_zone_analyzer),
     _user: UserResponse = Depends(get_current_user),
 ):
-    """Within-zone HDBSCAN: cluster each zone's images independently.
+    """Within-zone GMM: cluster each zone's images independently.
 
     For multi-zone projects where the user wants to surface intra-zone
     heterogeneity. Output is one composite ZoneAnalysisResult where each
@@ -872,10 +922,10 @@ def run_clustering_within_zones(
         zone_pts: list[dict] = []
         for img in imgs:
             row: dict = {"point_id": img.image_id, "zone_id": img.zone_id}
-            if img.latitude is not None and img.longitude is not None:
+            has_gps = img.latitude is not None and img.longitude is not None
+            if has_gps:
                 row["lat"] = img.latitude
                 row["lng"] = img.longitude
-                n_total_gps += 1
             has_any = False
             for ind_id in valid_ids:
                 key = ind_id if request.layer == "full" else f"{ind_id}__{request.layer}"
@@ -885,6 +935,11 @@ def run_clustering_within_zones(
                     has_any = True
             if has_any:
                 zone_pts.append(row)
+                # Count GPS only for rows actually USED (has_any), matching
+                # n_total_points. Previously every GPS image bumped the count
+                # even if it had no indicator values and was dropped here.
+                if has_gps:
+                    n_total_gps += 1
         n_total_points += len(zone_pts)
 
         if len(zone_pts) < request.min_points:
@@ -1012,11 +1067,11 @@ def run_clustering_within_zones(
     # chips, etc.) see drill-specific data when the user switches the
     # "Showing" pill. Without this attachment, every consumer falls back to
     # the project-level `clusteringResult.clustering` which is `first_cl`
-    # — only the first zone's HDBSCAN result — and the displayed cluster
+    # — only the first zone's GMM result — and the displayed cluster
     # set is stuck on Zone 1 regardless of which drill is active.
     #
     # Attachment policy:
-    #   • within_zone:<zone_id>  → that zone's own HDBSCAN result.
+    #   • within_zone:<zone_id>  → that zone's own GMM result.
     #   • all_sub_clusters       → synthesized composite ClusteringResult
     #                              with archetypes concatenated across all
     #                              zones (re-IDed to be globally unique).
@@ -1029,7 +1084,7 @@ def run_clustering_within_zones(
     #                              on them simply won't render on the
     #                              all_sub_clusters view, which is the
     #                              correct UX (those charts visualise a
-    #                              single HDBSCAN run, not a concatenation).
+    #                              single GMM run, not a concatenation).
     #   • parent_zones           → no .clustering (parent zones are
     #                              zone-level units, not clusters).
     #
@@ -1051,14 +1106,14 @@ def run_clustering_within_zones(
     for view_zone_id, (cl_i, _) in cluster_results_by_zone.items():
         zone_name_str = zone_name_by_id_for(project, view_zone_id)
         # Re-id with enumeration index (NOT prof.archetype_id) so composite IDs
-        # are globally unique. HDBSCAN can produce non-consecutive archetype_ids
+        # are globally unique. GMM can produce non-consecutive archetype_ids
         # (e.g. [0, 1, 4] after noise stripping); using prof.archetype_id as the
         # offset summand collided across zones (Zone A [0,1,4] + Zone B [0,1,2]
         # with composite_k=3 yielded duplicate id 4 = 0+4 and 3+1), which
         # triggered React duplicate-key warnings on the chip Wrap and the
         # centroid heatmap rows. The original archetype_id is preserved in the
         # label suffix when it differs from the enumeration index so users can
-        # trace back to the per-zone HDBSCAN output.
+        # trace back to the per-zone GMM output.
         for idx, prof in enumerate(cl_i.archetype_profiles):
             new_id = composite_k + idx
             original_aid = int(prof.archetype_id)
@@ -1084,7 +1139,7 @@ def run_clustering_within_zones(
         from app.models.analysis import ClusteringResult as _CR
         composite_silhouette = weighted_sil_sum / weighted_sil_n if weighted_sil_n > 0 else 0.0
         views["all_sub_clusters"].clustering = _CR(
-            method="within-zone composite (per-zone HDBSCAN concatenated)",
+            method="within-zone composite (per-zone GMM concatenated)",
             k=composite_k,
             silhouette_score=round(composite_silhouette, 4),
             silhouette_scores=[],
@@ -1245,6 +1300,9 @@ async def generate_design_strategies(
             # is now the authoritative source.
             project.ai_report = None
             project.ai_report_meta = None
+            _mirror_into_active_panorama_bucket(
+                project, slot, design_strategies=payload, invalidate_report=True,
+            )
             project.analysis_results_updated_at = datetime.now()
             store.save(project)
     return result
@@ -1287,10 +1345,20 @@ async def generate_report(
             # id like 'parent_zones' or 'within_zone:zone_3'); else fall
             # back to the legacy 2-state grouping_mode for older clients.
             slot = (request.view_id or request.grouping_mode) or "zones"
+            # Stamp the FINE-GRAINED view id into the meta so the frontend's
+            # stale-view banner compares like-for-like (slot vs activeViewId).
+            # Without this it falls back to the coarse `grouping_mode`
+            # ('clusters'), which never equals a within_zone:* / parent_zones
+            # activeViewId → false "written for clusters view" warning even
+            # when the report WAS written for the current view.
+            meta["view_id"] = slot
             project.ai_reports = {**(project.ai_reports or {}), slot: result.content}
             project.ai_report_metas = {**(project.ai_report_metas or {}), slot: meta}
             project.ai_report = result.content
             project.ai_report_meta = meta
+            _mirror_into_active_panorama_bucket(
+                project, slot, ai_report=result.content, ai_report_meta=meta,
+            )
             project.analysis_results_updated_at = datetime.now()
             store.save(project)
     return result
@@ -1420,6 +1488,9 @@ async def generate_design_strategies_stream(
                 (project.ai_report_metas or {}).pop(slot, None)
                 project.ai_report = None
                 project.ai_report_meta = None
+                _mirror_into_active_panorama_bucket(
+                    project, slot, design_strategies=payload, invalidate_report=True,
+                )
                 project.analysis_results_updated_at = datetime.now()
                 store.save(project)
 
@@ -1469,10 +1540,16 @@ async def generate_report_stream(
                 # id like 'parent_zones' or 'within_zone:zone_3'); else fall
                 # back to the legacy 2-state grouping_mode for older clients.
                 slot = (request.view_id or request.grouping_mode) or "zones"
+                # Fine-grained view id for the frontend stale-view banner
+                # (see non-streaming endpoint for the full rationale).
+                meta["view_id"] = slot
                 project.ai_reports = {**(project.ai_reports or {}), slot: result.content}
                 project.ai_report_metas = {**(project.ai_report_metas or {}), slot: meta}
                 project.ai_report = result.content
                 project.ai_report_meta = meta
+                _mirror_into_active_panorama_bucket(
+                    project, slot, ai_report=result.content, ai_report_meta=meta,
+                )
                 project.analysis_results_updated_at = datetime.now()
                 store.save(project)
 
@@ -2104,83 +2181,4 @@ async def _execute_project_pipeline(
             # per-view metrics back onto img.metrics_results before clustering
             # (or any other downstream consumer that reads metrics_results
             # directly) runs. Without this, clustering would always operate
-            # on the LAST pipeline run's metrics, ignoring the active view —
-            # the "Cluster view 跨视角数据相同" bug.
-            project.panorama_view_results[panorama_view] = {
-                "zone_analysis_result": project.zone_analysis_result,
-                "ai_reports": dict(project.ai_reports),
-                "ai_report_metas": dict(project.ai_report_metas),
-                "design_strategy_results": dict(project.design_strategy_results),
-                "analysis_results_updated_at": (
-                    project.analysis_results_updated_at.isoformat()
-                    if project.analysis_results_updated_at else None
-                ),
-                "image_metrics": {
-                    img.image_id: dict(img.metrics_results)
-                    for img in project.uploaded_images
-                    if img.metrics_results
-                },
-            }
-            project.active_panorama_view = panorama_view
-        projects_store.save(project)
-
-    # SSE event uses the stripped copy of zone_analysis (image_records=[])
-    # to keep the wire payload small. The persisted project (just saved
-    # above) keeps the full image_records.
-    if za_for_sse is not None:
-        result_dict = {**result_dict, "zone_analysis": za_for_sse}
-    yield {"type": "result", "data": result_dict}
-
-
-@router.post("/project-pipeline", response_model=ProjectPipelineResult)
-async def run_project_pipeline(
-    request: ProjectPipelineRequest,
-    analyzer: ZoneAnalyzer = Depends(get_zone_analyzer),
-    engine: DesignEngine = Depends(get_design_engine),
-    calculator: MetricsCalculator = Depends(get_metrics_calculator),
-    manager: MetricsManager = Depends(get_metrics_manager),
-    _user: UserResponse = Depends(get_current_user),
-):
-    """Run the full project pipeline."""
-    final_result: Optional[dict] = None
-    async for event in _execute_project_pipeline(request, analyzer, engine, calculator, manager):
-        if event.get("type") == "error":
-            raise HTTPException(
-                status_code=404 if "not found" in event["message"].lower() else 400,
-                detail=event["message"],
-            )
-        if event.get("type") == "result":
-            final_result = event["data"]
-
-    if final_result is None:
-        raise HTTPException(status_code=500, detail="Pipeline finished without producing a result")
-    return ProjectPipelineResult(**final_result)
-
-
-@router.post("/project-pipeline/stream")
-async def run_project_pipeline_stream(
-    request: ProjectPipelineRequest,
-    analyzer: ZoneAnalyzer = Depends(get_zone_analyzer),
-    engine: DesignEngine = Depends(get_design_engine),
-    calculator: MetricsCalculator = Depends(get_metrics_calculator),
-    manager: MetricsManager = Depends(get_metrics_manager),
-    _user: UserResponse = Depends(get_current_user),
-):
-    """Stream project pipeline progress via Server-Sent Events."""
-    async def event_generator():
-        try:
-            async for event in _execute_project_pipeline(request, analyzer, engine, calculator, manager):
-                yield f"data: {_safe_json(event)}\n\n"
-        except Exception as e:
-            logger.error("Project pipeline stream crashed: %s", e, exc_info=True)
-            yield f"data: {_safe_json({'type': 'error', 'message': str(e)})}\n\n"
-
-    return StreamingResponse(
-        event_generator(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",
-        },
-    )
+     

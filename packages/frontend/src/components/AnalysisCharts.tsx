@@ -3229,7 +3229,7 @@ export function DataQualityTable({ rows }: DataQualityTableProps) {
 
 
 // ═════════════════════════════════════════════════════════════════════════
-// v6.1 — HDBSCAN Cluster Diagnostic Charts (Phase C)
+// v6.1 — Cluster Diagnostic Charts (Phase C)
 // ═════════════════════════════════════════════════════════════════════════
 
 // ─── 1) Cluster Centroid Heatmap (clusters × indicators z-score) ───────────
@@ -3363,7 +3363,7 @@ export function ClusterCentroidHeatmap({
 }
 
 
-// ─── 2) Per-Point Silhouette Plot (HDBSCAN-aware) ───────────────────────────
+// ─── 2) Per-Point Silhouette Plot ───────────────────────────────────────────
 
 interface SilhouettePerPointPlotProps {
   silhouettePerPoint: (number | null)[];
@@ -3479,119 +3479,16 @@ export function SilhouettePerPointPlot({
       <Text fontSize="xs" color="gray.500" mt={2}>
         Each row is a point; bars left of zero indicate the point is closer to
         another cluster (low silhouette → boundary case). Gray bars mark
-        points HDBSCAN flagged as noise before reassignment.
+        points formerly flagged as noise before reassignment.
       </Text>
     </Box>
   );
 }
 
 
-// ─── 3) HDBSCAN Condensed Tree ──────────────────────────────────────────────
+// ─── 3) Condensed Tree (removed) ────────────────────────────────────────────
 
-interface HDBSCANCondensedTreeProps {
-  edges: { parent: number; child: number; lambda_val: number; child_size: number }[];
-  persistence?: Record<string, number>;
-}
-
-export function HDBSCANCondensedTree({ edges, persistence }: HDBSCANCondensedTreeProps) {
-  const { lambdaMax } = useMemo(() => {
-    if (!edges || edges.length === 0) return { lambdaMax: 0 };
-    let lmax = 0;
-    for (const e of edges) lmax = Math.max(lmax, e.lambda_val);
-    return { lambdaMax: lmax };
-  }, [edges]);
-
-  if (!edges || edges.length === 0) {
-    return (
-      <Text fontSize="sm" color="gray.500" fontStyle="italic" p={4}>
-        No condensed tree available (HDBSCAN fallback may have triggered).
-      </Text>
-    );
-  }
-
-  const W = 540;
-  const H = 320;
-  const padX = 50;
-  const padY = 30;
-
-  const childrenByParent = new Map<number, number[]>();
-  edges.forEach(e => {
-    if (!childrenByParent.has(e.parent)) childrenByParent.set(e.parent, []);
-    childrenByParent.get(e.parent)!.push(e.child);
-  });
-  const xPos = new Map<number, number>();
-  const allChildren = new Set(edges.map(e => e.child));
-  const roots = [...new Set(edges.map(e => e.parent))].filter(p => !allChildren.has(p));
-  let leafCounter = 0;
-  const totalLeaves = Math.max(1, edges.length / 2);
-  const layout = (id: number) => {
-    const kids = childrenByParent.get(id) ?? [];
-    if (kids.length === 0) {
-      xPos.set(id, padX + (leafCounter / Math.max(1, totalLeaves)) * (W - 2 * padX));
-      leafCounter++;
-      return;
-    }
-    kids.forEach(layout);
-    const xs = kids.map(k => xPos.get(k) ?? padX);
-    xPos.set(id, xs.reduce((a, b) => a + b, 0) / xs.length);
-  };
-  roots.forEach(layout);
-
-  const yForLambda = (l: number) => padY + (l / Math.max(0.0001, lambdaMax)) * (H - 2 * padY);
-
-  return (
-    <Box overflow="visible">
-      <svg width={W} height={H + 40} style={{ fontFamily: 'system-ui, sans-serif', overflow: 'visible' }}>
-        <line x1={padX - 8} y1={padY} x2={padX - 8} y2={H - padY} stroke="#A0AEC0" />
-        <text x={padX - 12} y={padY - 4} fontSize={10} textAnchor="end" fill="#4A5568">
-          λ = {lambdaMax.toFixed(2)}
-        </text>
-        <text x={padX - 12} y={H - padY + 4} fontSize={10} textAnchor="end" fill="#4A5568">λ = 0</text>
-        <text transform={`translate(14, ${H / 2}) rotate(-90)`} fontSize={10} fill="#4A5568">
-          λ (density threshold)
-        </text>
-
-        {edges.map((e, i) => {
-          const x1 = xPos.get(e.parent) ?? padX;
-          const x2 = xPos.get(e.child) ?? padX;
-          const y1 = yForLambda(0);
-          const y2 = yForLambda(e.lambda_val);
-          const isLeaf = e.child_size > 1;
-          const persistKey = String(e.child);
-          const persist = persistence?.[persistKey];
-          return (
-            <g key={i}>
-              <line
-                x1={x1} y1={y1} x2={x1} y2={y2}
-                stroke={isLeaf ? '#3182CE' : '#CBD5E0'}
-                strokeWidth={Math.max(1, Math.min(8, Math.log2(e.child_size + 1)))}
-                strokeOpacity={0.6}
-              />
-              <line x1={x1} y1={y2} x2={x2} y2={y2} stroke="#A0AEC0" strokeWidth={1} />
-              {isLeaf && (
-                <circle
-                  cx={x2}
-                  cy={y2}
-                  r={Math.max(2, Math.min(6, Math.sqrt(e.child_size)))}
-                  fill={persist && persist > 0.05 ? '#38A169' : '#3182CE'}
-                  fillOpacity={0.85}
-                >
-                  <title>
-                    Cluster #{e.child} · size = {e.child_size}
-                    {persist !== undefined ? ` · persistence = ${persist.toFixed(3)}` : ''}
-                  </title>
-                </circle>
-              )}
-            </g>
-          );
-        })}
-      </svg>
-      <Text fontSize="xs" color="gray.500" mt={2}>
-        Tree from HDBSCAN. Y-axis is λ (inverse density threshold). Branches
-        spanning a wide λ range (long vertical bars) are stable clusters;
-        short/thin slivers were rejected as density noise. Green dots =
-        clusters with persistence &gt; 0.05.
-      </Text>
-    </Box>
-  );
-}
+// The condensed-tree component was removed when GMM-BIC became the clustering
+// method (see clustering_service.py), so the E-series no longer includes a
+// condensed-tree chart.
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   

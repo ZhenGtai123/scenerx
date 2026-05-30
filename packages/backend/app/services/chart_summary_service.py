@@ -98,8 +98,8 @@ _CHART_TEMPLATE_HINTS: dict[str, str] = {
     "silhouette-curve":
         "\nIMPORTANT LOGIC for this chart:\n"
         "(1) If ANY K→silhouette data points are visible (e.g. K=2→0.45), "
-        "that PROVES HDBSCAN + GMM both failed and KMeans fallback ran. Do "
-        "NOT claim 'chart is empty' or 'HDBSCAN succeeded'.\n"
+        "that PROVES GMM (BIC-selected K) failed to find >=2 clusters and the "
+        "KMeans fallback ran. Do NOT claim 'chart is empty' or 'GMM succeeded'.\n"
         "(2) The selected K is NOT necessarily the silhouette peak — it's a "
         "multi-criterion vote (silhouette + Davies-Bouldin + Calinski-"
         "Harabasz). Check the `is_selected` flag in payload. If silhouette "

@@ -479,17 +479,17 @@ export interface ClusteringResult {
   labels_smoothed: number[];
   // Ward hierarchical linkage (for dendrogram): [id1, id2, dist, count]
   dendrogram_linkage: number[][];
-  // ── HDBSCAN-specific (v6.1) ──
-  /** Persistence per cluster (HDBSCAN's stability score). Higher = more
-   *  robust under density variation. Map: cluster_id (string) → score. */
+  // ── Legacy density-clustering fields (v6.1, deprecated; empty since v6.2 GMM) ──
+  /** Persistence per cluster (legacy density-stability score). Higher = more
+   *  robust. Map: cluster_id (string) → score. */
   cluster_persistence?: Record<string, number>;
   /** Per-point silhouette coefficient (against final labels). null = noise. */
   silhouette_per_point?: (number | null)[];
-  /** Number of points HDBSCAN labelled as noise before reassignment. */
+  /** Number of points formerly labelled as noise before reassignment (legacy). */
   noise_count?: number;
   /** Original IDs of noise points (for highlighting in spatial map). */
   noise_point_ids?: string[];
-  /** HDBSCAN condensed-tree edges for D3 visualization. */
+  /** Legacy condensed-tree edges (former density-clustering tree visual; unused). */
   condensed_tree?: { parent: number; child: number; lambda_val: number; child_size: number }[];
 }
 

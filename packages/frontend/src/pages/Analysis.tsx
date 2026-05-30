@@ -79,16 +79,25 @@ function Analysis() {
   // Reports page. No pipeline config beyond indicator selection remains.
 
   // Queries
-  const { data: projects } = useProjects();
+  const { data: projects, isLoading: projectsLoading } = useProjects();
   const { data: calculators } = useCalculators();
 
   const selectedProjectId = routeProjectId || '';
+  const selectedProject = useMemo(() => {
+    if (!selectedProjectId || !projects) return null;
+    return projects.find(p => p.id === selectedProjectId) ?? null;
+  }, [selectedProjectId, projects]);
   const selectedIndicatorIds = useMemo(() => {
     if (!calculators || calculators.length === 0) return [];
-    return selectedIndicators
+    // Prefer the FETCHED project's selected_indicators so the chips render as
+    // soon as the project list lands — independent of when the Zustand store
+    // hydrates. Navigating BACK to this page used to flash "0 indicators"
+    // until store hydration caught up; the store is the pre-hydration fallback.
+    const src = (selectedProject?.selected_indicators ?? selectedIndicators) as { indicator_id: string }[];
+    return src
       .map(i => i.indicator_id)
       .filter(id => calculators.some(c => c.id === id));
-  }, [selectedIndicators, calculators]);
+  }, [selectedProject, selectedIndicators, calculators]);
 
   // A pipeline is "running for *this* project" iff the global run state is
   // active and pinned to this projectId. If another project's pipeline is in
@@ -101,11 +110,6 @@ function Analysis() {
   // active; once that step completes, hide them so they don't show stale
   // values while later stages run.
   const calcDone = streamSteps.some(s => s.step === 'run_calculations' && s.status === 'completed');
-
-  const selectedProject = useMemo(() => {
-    if (!selectedProjectId || !projects) return null;
-    return projects.find(p => p.id === selectedProjectId) ?? null;
-  }, [selectedProjectId, projects]);
 
   const projectSummary = useMemo(() => {
     if (!selectedProject) return null;
@@ -174,7 +178,7 @@ function Analysis() {
         </CardHeader>
         <CardBody>
           <Text fontWeight="bold" mb={3}>
-            Project: {selectedProject?.project_name || routeProjectId || 'No project'}
+            Project: {selectedProject?.project_name || (projectsLoading ? 'Loading…' : (routeProjectId || 'No project'))}
           </Text>
 
           {isRunningElsewhere && (
@@ -217,10 +221,13 @@ function Analysis() {
                 </WrapItem>
               ))}
             </Wrap>
-            {selectedIndicatorIds.length === 0 && (
+            {selectedIndicatorIds.length === 0 && selectedProject && (
               <Text fontSize="sm" color="orange.500">
                 No indicators selected. Go back to the Indicators step to select indicators.
               </Text>
+            )}
+            {selectedIndicatorIds.length === 0 && !selectedProject && projectsLoading && (
+              <Text fontSize="sm" color="gray.500">Loading project…</Text>
             )}
           </Box>
 

@@ -32,10 +32,9 @@ import {
   // v4 / Phase 2
   WithinZoneImageDistribution,
   IndicatorValueMapWithToggle,
-  // v6.1 — HDBSCAN cluster diagnostic charts
+  // v6.1 — cluster diagnostic charts
   ClusterCentroidHeatmap,
   SilhouettePerPointPlot,
-  HDBSCANCondensedTree,
 } from '../AnalysisCharts';
 import { ResponsiveSmallMultiples } from './ResponsiveSmallMultiples';
 import type { ChartContext } from './ChartContext';
@@ -157,7 +156,7 @@ export interface ChartDescriptor {
   /** Human-readable title shown in Card header + picker checkbox */
   title: string;
   /** Optional registry code rendered as a Badge next to the title.
-   * v4: unified scheme A1/A2 · B1–B4 · C1–C4 · D1–D3 plus E1–E8
+   * v4: unified scheme A1/A2 · B1–B4 · C1–C4 · D1–D3 plus E1–E7
    * when cluster diagnostics are available (legacy M1–M4 retired). */
   refCode?: string;
   /** Which tab this chart renders in */
@@ -252,7 +251,7 @@ function correlationByLayer(ctx: ChartContext) {
 const LAYERS_FOR_PAYLOAD = ['full', 'foreground', 'middleground', 'background'];
 
 // ---------------------------------------------------------------------------
-// Registry (v4 / Module 5 — order = render order; refCodes A1/A2 · B1–B4 · C1–C4 · D1–D3 · E1–E8)
+// Registry (v4 / Module 5 — order = render order; refCodes A1/A2 · B1–B4 · C1–C4 · D1–D3 · E1–E7)
 // ---------------------------------------------------------------------------
 //
 // v4 changes (Phase 1):
@@ -1177,11 +1176,11 @@ export const CHART_REGISTRY: ChartDescriptor[] = [
   },
 
   // ── Section E · Cluster Diagnostics ──────────────────────────────────
-  // v6.1 — HDBSCAN replaced KMeans + silhouette-K-search. The four charts
-  // below cover algorithm interpretation (centroid heatmap), geographic
-  // validation (spatial map — already exists as ClusterSpatialBeforeAfter),
-  // quality assessment (per-point silhouette), and HDBSCAN's own algorithm-
-  // specific diagnostic (condensed tree).
+  // v6.2 — GMM-BIC clustering (replaced the earlier KMeans+silhouette-K and
+  // density-based approaches). The charts below cover algorithm interpretation
+  // (centroid heatmap), geographic validation (spatial map — already exists
+  // as ClusterSpatialBeforeAfter), and quality assessment (per-point
+  // silhouette + silhouette-score curve).
   {
     id: 'cluster-centroid-heatmap',
     title: 'Cluster Centroid Heatmap',
@@ -1278,45 +1277,13 @@ export const CHART_REGISTRY: ChartDescriptor[] = [
     },
   },
   {
-    id: 'hdbscan-condensed-tree',
-    title: 'HDBSCAN Condensed Tree',
+    id: 'silhouette-curve',
+    title: 'Silhouette Score Curve (KMeans last-resort fallback)',
     refCode: 'E3',
     tab: 'analysis',
     section: 'clustering',
     description:
-      'Density-stability tree. Long vertical branches = stable clusters; short slivers = rejected density noise.',
-    viableInModes: ['cluster'],
-    isAvailable: (ctx) =>
-      !!ctx.effectiveClustering?.condensed_tree &&
-      ctx.effectiveClustering.condensed_tree.length > 0,
-    summaryPayload: (ctx) => {
-      const cl = ctx.effectiveClustering;
-      if (!cl) return null;
-      const edges = cl.condensed_tree ?? [];
-      return {
-        analysis_mode: ctx.analysisMode,
-        method: cl.method,
-        n_edges: edges.length,
-        has_condensed_tree: edges.length > 0,
-        n_clusters: cl.archetype_profiles.length,
-        cluster_persistence: cl.cluster_persistence ?? null,
-      };
-    },
-    render: (ctx) => (
-      <HDBSCANCondensedTree
-        edges={ctx.effectiveClustering!.condensed_tree ?? []}
-        persistence={ctx.effectiveClustering!.cluster_persistence}
-      />
-    ),
-  },
-  {
-    id: 'silhouette-curve',
-    title: 'Silhouette Score Curve (KMeans last-resort fallback)',
-    refCode: 'E4',
-    tab: 'analysis',
-    section: 'clustering',
-    description:
-      'Per-K silhouette curve from the KMeans last-resort fallback. The presence of this chart means HDBSCAN (density-based) and GMM (BIC-selected) both failed to find ≥2 clusters on this data, so the service swept K=2..max_k with KMeans. The selected K uses a multi-criterion vote across silhouette + Davies-Bouldin + Calinski-Harabasz — NOT just the silhouette peak — so a low-K silhouette winner can be overridden by other criteria. Silhouette interpretation: ≥0.5 strong cluster separation, 0.25-0.5 weak/overlapping, ≤0.25 essentially no structure. If silhouette is ≤0.25 across all K, the data genuinely has no rich cluster structure and K=2 (or even reporting "no clustering applicable") is the honest answer.',
+      'Per-K silhouette curve from the KMeans last-resort fallback. The presence of this chart means GMM (BIC-selected K) failed to find ≥2 clusters on this data, so the service swept K=2..max_k with KMeans. The selected K uses a multi-criterion vote across silhouette + Davies-Bouldin + Calinski-Harabasz — NOT just the silhouette peak — so a low-K silhouette winner can be overridden by other criteria. Silhouette interpretation: ≥0.5 strong cluster separation, 0.25-0.5 weak/overlapping, ≤0.25 essentially no structure. If silhouette is ≤0.25 across all K, the data genuinely has no rich cluster structure and K=2 (or even reporting "no clustering applicable") is the honest answer.',
     viableInModes: ['cluster'],
     isAvailable: (ctx) =>
       !!ctx.effectiveClustering?.silhouette_scores &&
@@ -1347,7 +1314,7 @@ export const CHART_REGISTRY: ChartDescriptor[] = [
   {
     id: 'dendrogram',
     title: 'Ward Hierarchical Clustering',
-    refCode: 'E5',
+    refCode: 'E4',
     tab: 'analysis',
     section: 'clustering',
     description: 'Dendrogram from Ward linkage.',
@@ -1375,7 +1342,7 @@ export const CHART_REGISTRY: ChartDescriptor[] = [
   {
     id: 'cluster-spatial-smoothing',
     title: 'Cluster Spatial Smoothing',
-    refCode: 'E6',
+    refCode: 'E5',
     tab: 'analysis',
     section: 'clustering',
     description: 'Before/after KNN spatial smoothing comparison (needs GPS).',
@@ -1419,7 +1386,7 @@ export const CHART_REGISTRY: ChartDescriptor[] = [
   {
     id: 'archetype-radar',
     title: 'Cluster Radar Profiles',
-    refCode: 'E7',
+    refCode: 'E6',
     tab: 'analysis',
     section: 'clustering',
     description: 'z-score radar for each discovered cluster.',
@@ -1452,7 +1419,7 @@ export const CHART_REGISTRY: ChartDescriptor[] = [
   {
     id: 'cluster-size-distribution',
     title: 'Cluster Size Distribution',
-    refCode: 'E8',
+    refCode: 'E7',
     tab: 'analysis',
     section: 'clustering',
     description: 'Point count per cluster.',
@@ -1486,3 +1453,4 @@ export function getDescriptorBySection(
 ): ChartDescriptor[] {
   return CHART_REGISTRY.filter((c) => c.section === section);
 }
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               

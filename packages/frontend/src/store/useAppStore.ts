@@ -210,7 +210,7 @@ interface AppState {
   /** v4 / Module 1 (multi-zone variant). Picked once per session for
    *  projects with ≥ 2 user zones:
    *   'zone_only'           — keep zone-level analysis as-is
-   *   'within_zone_cluster' — within each zone run HDBSCAN, treat sub-clusters as virtual zones */
+   *   'within_zone_cluster' — within each zone run clustering, treat sub-clusters as virtual zones */
   multiZoneStrategy: 'zone_only' | 'within_zone_cluster' | null;
   setMultiZoneStrategy: (s: 'zone_only' | 'within_zone_cluster' | null) => void;
 }
@@ -509,11 +509,20 @@ export const useAppStore = create<AppState>()(persist((set, get) => ({
     // Backward-compat: legacy single-slot project.ai_report falls into the
     // 'zones' view if it has no other home, so projects from before the
     // multi-view refactor still display correctly.
+    // Panorama projects store reports ONLY in the per-view dict + per-panorama
+    // buckets. The legacy single `ai_report` is NOT mirrored per panorama view,
+    // so for a panorama project it lingers from whatever view last generated.
+    // Injecting it via the fallback below bled a stale report across views (and
+    // blanked out when the guessed legacyViewId != activeViewId) — the
+    // "report disappears / shows wrong on switch" bug. So: dict-only for
+    // panorama projects; the single-slot fallback is for legacy non-panorama
+    // projects only.
+    const _isPanoramaProject = !!(project.active_panorama_views && project.active_panorama_views.length > 0);
     const projAiReports = (project.ai_reports ?? {}) as Record<string, string | null>;
     const projAiReportMetas = (project.ai_report_metas ?? {}) as Record<string, Record<string, unknown> | null>;
     const aiReportsByViewId: Record<string, string | null> = { ...projAiReports };
     const aiReportMetasByViewId: Record<string, Record<string, unknown> | null> = { ...projAiReportMetas };
-    if (Object.values(aiReportsByViewId).every((v) => v == null) && project.ai_report) {
+    if (!_isPanoramaProject && Object.values(aiReportsByViewId).every((v) => v == null) && project.ai_report) {
       const legacyViewId = ((project.ai_report_meta as { grouping_mode?: string; view_id?: string } | undefined)
         ?.view_id
         ?? (project.ai_report_meta as { grouping_mode?: string } | undefined)?.grouping_mode
@@ -525,20 +534,57 @@ export const useAppStore = create<AppState>()(persist((set, get) => ({
     const projDesignResults = (project.design_strategy_results ?? {}) as Record<string, DesignStrategyResult | null>;
     const designStrategyResultsByViewId: Record<string, DesignStrategyResult | null> = { ...projDesignResults };
     if (
-      Object.values(designStrategyResultsByViewId).every((v) => v == null)
+      !_isPanoramaProject
+      && Object.values(designStrategyResultsByViewId).every((v) => v == null)
       && project.design_strategy_result
     ) {
       designStrategyResultsByViewId.zones = project.design_strategy_result as DesignStrategyResult;
     }
 
-    // The currently-active view: prefer whatever was active before
-    // (preservedGroupingMode for sameProject re-mount), else default to
-    // 'zones'. Phase C will introduce a richer activeViewId concept; for
-    // now it tracks the legacy groupingMode 1:1.
-    const activeViewId = preservedGroupingMode;
+    // The currently-active view. PRESERVE the real Phase-C activeViewId across
+    // same-project hydrations (panorama-view switch, React Query refetch).
+    //
+    // Why this matters: AI reports / design strategies are keyed by the rich
+    // activeViewId ('parent_zones' / 'all_sub_clusters' / 'within_zone:zone_X'),
+    // both in the store's per-view dicts and in the backend slot
+    // (slot = view_id or grouping_mode; see analysis.py generate-report). The
+    // OLD code reset activeViewId to the LEGACY groupingMode ('zones'/'clusters')
+    // on every hydrate, so after a panorama switch (which hydrates) the report
+    // was looked up as aiReportsByViewId['clusters'] — a key that never holds a
+    // within-zone report — and the AI Report card went blank. Preserving the
+    // real id keeps the lookup correct so the report survives the switch.
+    // On a genuine project switch (!sameProject) there is no prior view, so we
+    // fall back to the legacy groupingMode default.
+    // v4.x — Validate that the preserved activeViewId still refers to a live
+    // zone. The user may have deleted the zone since the view was set; in
+    // that case friendlyViewLabel (Reports.tsx) would fall back to the raw
+    // zone_id, which surfaces ugly strings like "ZONE_1778335346696
+    // (sub-clusters)" in the Baseline banner. Reset to preservedGroupingMode
+    // when the referenced zone no longer exists, matching the
+    // sameProject=false branch behavior.
+    const candidateViewId = (sameProject && state.activeViewId)
+      ? state.activeViewId
+      : preservedGroupingMode;
+    const activeViewId = (() => {
+      if (!candidateViewId.startsWith('within_zone:')) return candidateViewId;
+      const zid = candidateViewId.slice('within_zone:'.length);
+      const zonesNow = (project.spatial_zones ?? []) as Array<{ zone_id: string }>;
+      const stillExists = zonesNow.some((z) => z.zone_id === zid);
+      return stillExists ? candidateViewId : preservedGroupingMode;
+    })();
     const activeReport = aiReportsByViewId[activeViewId] ?? null;
     const activeMeta = aiReportMetasByViewId[activeViewId] ?? null;
     const activeStrategies = designStrategyResultsByViewId[activeViewId] ?? null;
+    // When drilled into a SPECIFIC within-zone view (within_zone:zone_X),
+    // prefer that view's OWN analysis from the multi-view dict over the coarse
+    // grouping-mode-derived `nextZoneAnalysis` (which resolves to the
+    // all-zones cluster_view composite). Without this, a panorama switch while
+    // drilled into one zone's sub-clusters shows the all-zones composite
+    // instead of that zone's drill. Scoped to within_zone:* so the
+    // parent_zones / all_sub_clusters / clusters / zones paths are unchanged.
+    const activeZoneAnalysis = (activeViewId.startsWith('within_zone:') && nextAnalysisViews?.[activeViewId])
+      ? nextAnalysisViews[activeViewId]
+      : nextZoneAnalysis;
 
     return {
       recommendations: preservedRecommendations,
@@ -546,7 +592,7 @@ export const useAppStore = create<AppState>()(persist((set, get) => ({
       recommendationSummary: preservedSummary,
       selectedIndicators: project.selected_indicators ?? [],
       visionMaskResults: maskResults,
-      zoneAnalysisResult: nextZoneAnalysis,
+      zoneAnalysisResult: activeZoneAnalysis,
       designStrategyResult: activeStrategies,
       designStrategyResultsByViewId,
       pipelineResult: preservedPipelineResult,

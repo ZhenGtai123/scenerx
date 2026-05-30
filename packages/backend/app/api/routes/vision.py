@@ -188,9 +188,23 @@ async def analyze_image_by_path(
 
     Optionally pass project_id and image_id query params to persist masks.
     """
-    # Validate image exists
-    if not Path(image_path).exists():
+    # Guard against path traversal: only allow images under the app's own
+    # directory tree (temp/uploads, data, outputs all live under base_dir).
+    # Without this, an authenticated caller could read ANY file on disk
+    # (e.g. secrets, /etc/passwd) via a crafted image_path. We resolve first
+    # (collapsing `..` and symlinks) and require containment, then use the
+    # resolved path for the existence check + analysis to avoid TOCTOU.
+    try:
+        resolved_path = Path(image_path).resolve()
+        resolved_path.relative_to(settings.base_dir.resolve())
+    except (ValueError, OSError):
+        raise HTTPException(
+            status_code=403,
+            detail="image_path must be inside the application directory",
+        )
+    if not resolved_path.exists():
         raise HTTPException(status_code=404, detail=f"Image not found: {image_path}")
+    image_path = str(resolved_path)
 
     # Validate parameters
     valid, error = vision_client.validate_parameters(

@@ -2052,77 +2052,6 @@ def chart_cluster_size_distribution(zar: ZoneAnalysisResult) -> Optional[str]:
     return _fig_to_svg(fig)
 
 
-# ============================================================================
-# Chart 21 — HDBSCAN condensed tree
-# ============================================================================
-
-def chart_hdbscan_condensed_tree(zar: ZoneAnalysisResult) -> Optional[str]:
-    cl = zar.clustering
-    # v4.2 — instead of silently returning None when the run used
-    # KMeans/GMM fallback (no condensed tree exists), render an explicit
-    # placeholder so the reader knows WHY the slot is empty rather than
-    # wondering if the bundle is broken.
-    if not cl or not cl.condensed_tree:
-        fig, ax = plt.subplots(figsize=(7.4, 3.6))
-        fig.subplots_adjust(left=0.06, right=0.96, top=0.84, bottom=0.16)
-        ax.axis("off")
-        method = (cl.method if cl else "unknown") or "unknown"
-        reason = (
-            f"HDBSCAN density-clustering did not produce a condensed tree "
-            f"for this run.\nThe pipeline fell back to:\n\n"
-            f"    {method}\n\n"
-            f"Density-based clustering requires distinct density valleys; "
-            f"street-view\nindicator data typically vary continuously along "
-            f"a route, so HDBSCAN often\nreturns <2 clusters and the pipeline "
-            f"switches to GMM-BIC or KMeans + multi-\ncriterion vote. "
-            f"See Fig 19 (silhouette score curve) for the K-sweep used by "
-            f"the\nactual partition."
-        )
-        ax.text(0.5, 0.55, reason, ha="center", va="center",
-                fontsize=7.0, color=INK, family="Times New Roman",
-                linespacing=1.6,
-                bbox=dict(boxstyle="round,pad=0.8", fc=SHADE,
-                          ec=HAIR, lw=0.4))
-        _decorate(
-            fig, ax,
-            title="HDBSCAN condensed tree (not applicable)",
-            subtitle="The clustering pipeline used a non-density-based fallback method on this run",
-            caption=f"Suppl. Fig 11. method = {method!r} · no condensed_tree edges available.",
-        )
-        return _fig_to_svg(fig)
-    edges = cl.condensed_tree
-    nodes = sorted({e["parent"] for e in edges} | {e["child"] for e in edges})
-    fig, ax = plt.subplots(figsize=(7.4, 3.6))
-    fig.subplots_adjust(left=0.10, right=0.96, top=0.84, bottom=0.18)
-    parent_lambda: dict[int, float] = {}
-    for e in edges:
-        parent_lambda[e["parent"]] = max(parent_lambda.get(e["parent"], 0.0),
-                                          float(e.get("lambda_val", 0.0)))
-    xs: dict[int, float] = {}
-    sorted_nodes = sorted(nodes, key=lambda n: parent_lambda.get(n, 0.0))
-    for i, n in enumerate(sorted_nodes):
-        xs[n] = i
-    for e in edges:
-        x0, x1 = xs[e["parent"]], xs[e["child"]]
-        y0 = parent_lambda.get(e["parent"], 0.0)
-        y1 = float(e.get("lambda_val", 0.0))
-        size = float(e.get("child_size", 1))
-        lw = 0.4 + math.log1p(size) * 0.35
-        colour = _category_color(int(e["child"]) % len(CATEGORICAL))
-        ax.plot([x0, x1], [y0, y1], color=colour, linewidth=lw, alpha=0.75)
-        ax.scatter([x1], [y1], s=10 + 4 * math.log1p(size),
-                    color=colour, edgecolor="white", linewidth=0.3)
-    ax.set_xlabel("Node index (ordered by λ)", fontsize=6.6)
-    ax.set_ylabel("Lambda value", fontsize=6.6)
-    ax.spines["bottom"].set_color(LINE); ax.spines["left"].set_color(LINE)
-    _decorate(
-        fig, ax,
-        title="HDBSCAN condensed tree",
-        subtitle="Density-based agglomeration · edge width ∝ child size · vertical = persistence",
-        caption=f"Suppl. Fig 11. n = {len(edges)} edges · {len(nodes)} nodes.",
-    )
-    return _fig_to_svg(fig)
-
 
 # ============================================================================
 # Chart 22 — cluster stability (v6.2 bootstrap validation)
@@ -2229,7 +2158,6 @@ CHART_FUNCS: dict[str, Any] = {
     "archetype-radar":                  chart_archetype_radar,
     "cluster-size-distribution":        chart_cluster_size_distribution,
     "cluster-stability":                chart_cluster_stability,
-    "hdbscan-condensed-tree":           chart_hdbscan_condensed_tree,
 }
 
 CHART_TITLES = {
@@ -2254,7 +2182,6 @@ CHART_TITLES = {
     "archetype-radar":                  "Cluster radar profiles",
     "cluster-size-distribution":        "Cluster size distribution",
     "cluster-stability":                "Cluster stability (bootstrap validation)",
-    "hdbscan-condensed-tree":           "HDBSCAN condensed tree",
 }
 
 
@@ -2280,7 +2207,6 @@ CHART_MODES: dict[str, set[str]] = {
     "correlation-heatmap":            {"multi_zone", "cluster"},
     "cluster-centroid-heatmap":       {"cluster"},
     "silhouette-per-point":           {"cluster"},
-    "hdbscan-condensed-tree":         {"cluster"},
     "silhouette-curve":               {"cluster"},
     "dendrogram":                     {"cluster"},
     "cluster-spatial-smoothing":      {"cluster"},
@@ -2336,3 +2262,4 @@ def render_all(
         len(out), len(CHART_FUNCS), effective_mode or "all",
     )
     return out
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          

@@ -153,7 +153,7 @@ export function buildChartContext(args: BuildArgs): ChartContext {
   //     sub-key set by the within-zones endpoint, so reading from it
   //     gives the drill-specific clusters.
   //   • clusteringResult.clustering is project-level: in multi-zone
-  //     within-zone mode it's `first_cl` (the first zone's HDBSCAN), which
+  //     within-zone mode it's `first_cl` (the first zone's clustering), which
   //     is the same regardless of which drill the user is looking at.
   //   • For single-zone Option C, both sources hold the same pooled GMM
   //     clustering, so the priority order doesn't change rendered output.
@@ -161,12 +161,12 @@ export function buildChartContext(args: BuildArgs): ChartContext {
   // ZONE-LEVEL GUARD: when the active view is zone-level (zone_source !==
   // 'cluster'), drop the fallback chain entirely. Otherwise on views like
   // "Parent zones" (zone_source='zone'), the fallback paints the
-  // project-level first_cl (= first zone's HDBSCAN) into every cluster
+  // project-level first_cl (= first zone's clustering) into every cluster
   // chart (silhouette plot, centroid heatmap, etc.), making it look like
   // "both zones were clustered together as one pool of 15 points" when in
-  // fact the backend ran HDBSCAN per-zone independently. The within-zones
+  // fact the backend ran clustering per-zone independently. The within-zones
   // endpoint does NOT do pooled clustering — each user zone gets its own
-  // separate HDBSCAN run; pooled-looking charts on zone-level views are
+  // separate clustering run; pooled-looking charts on zone-level views are
   // purely a frontend fallback artifact.
   //
   // Single-zone Option C: zoneAnalysisResult IS the cluster-rebuilt ZAR
