@@ -1256,10 +1256,12 @@ export const CHART_REGISTRY: ChartDescriptor[] = [
       const labels = cl.labels_smoothed ?? [];
       const byCluster = new Map<number, number[]>();
       for (let i = 0; i < sils.length; i++) {
+        const s = sils[i];
+        if (s == null) continue;
         const c = labels[i] ?? -1;
         if (c < 0) continue;
         const list = byCluster.get(c) ?? [];
-        list.push(sils[i]);
+        list.push(s);
         byCluster.set(c, list);
       }
       const perCluster = Array.from(byCluster.entries()).map(([cid, vals]) => {
@@ -1272,8 +1274,9 @@ export const CHART_REGISTRY: ChartDescriptor[] = [
           pct_negative: Number((100 * nNeg / vals.length).toFixed(1)),
         };
       }).sort((a, b) => a.cluster_id - b.cluster_id);
-      const overall = sils.length
-        ? Number((sils.reduce((a, b) => a + b, 0) / sils.length).toFixed(3))
+      const finiteSils = sils.filter((v): v is number => v != null);
+      const overall = finiteSils.length
+        ? Number((finiteSils.reduce((a, b) => a + b, 0) / finiteSils.length).toFixed(3))
         : 0;
       return {
         analysis_mode: ctx.analysisMode,

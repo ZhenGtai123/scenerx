@@ -496,7 +496,7 @@ export const useAppStore = create<AppState>()(persist((set, get) => ({
     let derivedUserZone: ZoneAnalysisResult | null = null;
     if (projZar) {
       const { cluster_view: _cv, analysis_views: _av, clustering: _cl, segment_diagnostics: _sd, ...rest } = projZar as Record<string, unknown>;
-      derivedUserZone = (rest as ZoneAnalysisResult) ?? null;
+      derivedUserZone = (rest as unknown as ZoneAnalysisResult) ?? null;
     }
     const nextUserZone = preservedUserZone ?? derivedUserZone;
 

@@ -403,12 +403,10 @@ export function ZonePriorityChart({ diagnostics }: ZonePriorityChartProps) {
           <LabelList
             dataKey="mean_abs_z"
             position="right"
-            content={(props: { x?: number | string; y?: number | string;
-                               width?: number | string; height?: number | string;
-                               value?: number | string; index?: number }) => {
+            content={(props: any) => {
               const x = Number(props.x); const y = Number(props.y);
               const w = Number(props.width); const h = Number(props.height);
-              const i = props.index;
+              const i = props.index as number | undefined;
               if (Number.isNaN(x) || Number.isNaN(y) || i == null) return null;
               const d = data[i];
               // v4.x — Defensive guard against white-screen: Recharts can call
@@ -1756,7 +1754,7 @@ export function ClusterSizeChart({ archetypes }: ClusterSizeChartProps) {
             const p = (payload?.[0]?.payload ?? {}) as { name?: string; shortName?: string };
             return `${p.shortName ?? ''} — ${p.name ?? ''}`;
           }}
-          formatter={(v: number, _n: string, ctx: { payload?: { sharePct?: number } }) =>
+          formatter={(v: any, _n: any, ctx: { payload?: { sharePct?: number } }) =>
             [`${v} · ${(ctx.payload?.sharePct ?? 0).toFixed(1)}%`, 'Count']
           }
         />
@@ -1766,13 +1764,11 @@ export function ClusterSizeChart({ archetypes }: ClusterSizeChartProps) {
           <LabelList
             dataKey="count"
             position="top"
-            content={(props: { x?: number | string; y?: number | string;
-                               width?: number | string; value?: number | string;
-                               index?: number }) => {
+            content={(props: any) => {
               const x = Number(props.x);
               const y = Number(props.y);
               const w = Number(props.width);
-              const i = props.index;
+              const i = props.index as number | undefined;
               if (Number.isNaN(x) || Number.isNaN(y) || i == null) return null;
               const d = data[i];
               // v4.x — Same defensive guard as the |z| LabelList above:
