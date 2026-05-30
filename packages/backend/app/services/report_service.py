@@ -938,4 +938,3 @@ class ReportService:
             summary[uid] = unit_data
 
         return json.dumps(summary, ensure_ascii=False, indent=2)
-                
