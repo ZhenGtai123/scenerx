@@ -104,6 +104,17 @@ export interface SectionMeta {
   /** v4 / Module 4: dynamic data-level badge shown next to the section title.
    * Returns the badge text given the current grouping mode. */
   dataLevelByMode?: (mode: 'zones' | 'clusters') => string;
+  /** v4.x — Dynamic section title that adapts to grouping mode. When the
+   * active view shows clusters (clusters / all_sub_clusters / within_zone:*),
+   * a section labelled "Zone-Level Findings" misleads the user into thinking
+   * the rows are zones. Sections that overload "zone" semantics provide a
+   * mode-aware title here; SectionHeading + Reports.tsx prefer this over
+   * `title` when present. */
+  titleByMode?: (mode: 'zones' | 'clusters') => string;
+  /** v4.x — Dynamic subtitle that mirrors titleByMode. Same rationale: the
+   * literal word "zone" in the subtitle is misleading on cluster-derived
+   * views. */
+  subtitleByMode?: (mode: 'zones' | 'clusters') => string;
 }
 
 export const SECTION_META: Record<ChartSection, SectionMeta> = {
@@ -118,6 +129,14 @@ export const SECTION_META: Record<ChartSection, SectionMeta> = {
     title: 'Zone-Level Findings',
     subtitle:
       'Where do zones differ? Cross-zone z-score ranking, indicator decomposition, layer profile, and geographic deviation.',
+    titleByMode: (mode) =>
+      mode === 'clusters'
+        ? 'Cluster-Level Findings'
+        : 'Zone-Level Findings',
+    subtitleByMode: (mode) =>
+      mode === 'clusters'
+        ? 'Where do clusters differ? Cross-cluster z-score ranking, indicator decomposition, layer profile, and geographic deviation.'
+        : 'Where do zones differ? Cross-zone z-score ranking, indicator decomposition, layer profile, and geographic deviation.',
     dataLevelByMode: (mode) =>
       mode === 'clusters'
         ? 'Cluster-as-zone (N = K clusters)'
@@ -1453,4 +1472,3 @@ export function getDescriptorBySection(
 ): ChartDescriptor[] {
   return CHART_REGISTRY.filter((c) => c.section === section);
 }
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               

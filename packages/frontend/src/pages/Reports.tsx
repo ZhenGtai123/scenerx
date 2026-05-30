@@ -1947,6 +1947,17 @@ function Reports() {
   // we don't fire for image-level fallback analyses (those don't have
   // cross-grouping charts in scope to begin with — viableInModes already
   // filters them).
+  // v4.x - per-view N<3 degeneracy gate. Fires once per view; the per-view
+  // chartCtx already reflects the active view's ZoneAnalysisResult, so this
+  // single check covers all 5 view options uniformly:
+  //   - zones                          : sortedDiagnostics.length = N zones
+  //   - clusters                       : sortedDiagnostics.length = K global clusters
+  //   - parent_zones                   : sortedDiagnostics.length = N parent zones
+  //   - all_sub_clusters               : sortedDiagnostics.length = total sub-clusters across zones
+  //   - within_zone:<zone_id>          : sortedDiagnostics.length = K sub-clusters of that zone
+  // The 5 cross-grouping charts (B1/B2/B3/B4/D3) collapse mathematically when
+  // there are fewer than 3 grouping units (see DEGENERATE_AT_N2_CHART_IDS
+  // comment for the math), so we hide them and surface ModeAlert instead.
   const isDegenerateN2Grouping =
     chartCtx.analysisMode === 'zone_level'
     && chartCtx.sortedDiagnostics.length <= 2
@@ -2594,6 +2605,16 @@ function Reports() {
           view_id: activeViewId,
           baseline_label: friendlyViewLabel(activeViewId, currentProject?.spatial_zones),
           baseline_units: zoneAnalysisResult.zone_diagnostics?.length ?? 0,
+          // v4.x - signal to the bundle packager that some cross-grouping
+          // charts (B1/B2/B3/B4/D3) were intentionally hidden because the
+          // active view only has 1 or 2 grouping units. exportBundle uses
+          // this to add a clear "Hidden charts" section in README.md so
+          // anyone opening the ZIP later understands why those charts are
+          // missing from the bundle.
+          degenerate_n2_active: isDegenerateN2Grouping,
+          degenerate_n2_hidden_chart_ids: isDegenerateN2Grouping
+            ? Array.from(DEGENERATE_AT_N2_CHART_IDS)
+            : [],
           cross_view_warning: 'Numeric values (|z|, z-scores, correlations) in this bundle are calibrated against the baseline above. Do NOT cross-compare with bundles exported from other views — their baselines differ.',
           zone_count: zoneAnalysisResult.zone_diagnostics?.length ?? 0,
           analysis_mode: zoneAnalysisResult.analysis_mode,
@@ -4201,6 +4222,11 @@ function Reports() {
                         </VStack>
                       );
 
+                      // v4.x - prefer mode-aware title/subtitle when defined
+                      // (e.g. "Cluster-Level Findings" in clusters view). Falls back
+                      // to the static title for sections without mode overload.
+                      const accordionTitle = meta.titleByMode?.(groupingMode) ?? meta.title;
+                      const accordionSubtitle = meta.subtitleByMode?.(groupingMode) ?? meta.subtitle;
                       if (meta.defaultCollapsed) {
                         return (
                           <Accordion
@@ -4212,10 +4238,10 @@ function Reports() {
                               <AccordionButton bg="gray.50" _hover={{ bg: 'gray.100' }}>
                                 <Box flex="1" textAlign="left">
                                   <Text fontWeight="bold" fontSize="sm" color="gray.700">
-                                    {meta.title}
+                                    {accordionTitle}
                                   </Text>
                                   <Text fontSize="xs" color="gray.500" mt={0.5}>
-                                    {meta.subtitle}
+                                    {accordionSubtitle}
                                   </Text>
                                 </Box>
                                 <AccordionIcon />

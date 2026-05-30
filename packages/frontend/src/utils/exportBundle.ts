@@ -553,6 +553,15 @@ export async function exportBundle(opts: BundleOptions): Promise<{
   const viewId = typeof md?.view_id === 'string' ? md.view_id : null;
   const baselineLabel = typeof md?.baseline_label === 'string' ? md.baseline_label : null;
   const baselineUnits = typeof md?.baseline_units === 'number' ? md.baseline_units : null;
+  // v4.x - degenerate-N2 awareness. Reports.tsx flags bundles where the
+  // active view has 1 or 2 grouping units (zones / clusters / sub-clusters)
+  // so the 5 cross-grouping charts B1/B2/B3/B4/D3 were intentionally
+  // hidden. We surface a "Hidden charts" block in README.md so the recipient
+  // doesn't think those charts are missing due to a bug or partial export.
+  const degenerateN2Active = md?.degenerate_n2_active === true;
+  const degenerateHiddenIds = Array.isArray(md?.degenerate_n2_hidden_chart_ids)
+    ? (md?.degenerate_n2_hidden_chart_ids as unknown[]).filter((v): v is string => typeof v === 'string')
+    : [];
   const baselineSection = (panoramaView || viewId || baselineLabel)
     ? `## ⚠ Baseline (read first)\n\n` +
       (panoramaView ? `- **Panorama view**: \`${panoramaView}\`\n` : '') +
@@ -570,9 +579,32 @@ export async function exportBundle(opts: BundleOptions): Promise<{
       `Raw indicator values (in CSVs) are absolute and ARE comparable.\n\n`
     : '';
 
+  // v4.x - Hidden-charts notice. When the active view has fewer than 3
+  // grouping units, the 5 cross-grouping charts collapse mathematically
+  // (z-scores hit ±0.71 / ±1, Pearson r is always ±1 for a 2-point fit).
+  // The Reports UI hides them with a yellow ModeAlert; the bundle simply
+  // doesn't include them. This block makes that absence explicit so a
+  // reviewer opening the ZIP doesn't think it's a bug or partial export.
+  const hiddenChartsSection = (degenerateN2Active && degenerateHiddenIds.length > 0)
+    ? `## ⚠ Hidden charts (N < 3 grouping units)\n\n` +
+      `The active view has only ${baselineUnits ?? 'a few'} grouping unit${baselineUnits === 1 ? '' : 's'},\n` +
+      `so the following cross-grouping charts have been intentionally\n` +
+      `omitted from this bundle. They are mathematically degenerate at\n` +
+      `N < 3 (z-scores collapse to ±√2/2 ≈ ±0.71 for N=2; Pearson r is\n` +
+      `always ±1 for any 2-point fit), so rendering them would mislead.\n\n` +
+      degenerateHiddenIds.map((id) => `- \`${id}\``).join('\n') + `\n\n` +
+      `To unhide these charts, get to ≥ 3 grouping units in the active\n` +
+      `view (e.g. add zones, run within-zone clustering with higher K,\n` +
+      `or switch to a view with more grouping units such as \`all_sub_clusters\`).\n\n` +
+      `Image-level distribution charts (section C) are unaffected and\n` +
+      `are included normally — they don't depend on cross-grouping\n` +
+      `comparison.\n\n`
+    : '';
+
   const readme =
     `# SceneRx export bundle\n\n` +
     baselineSection +
+    hiddenChartsSection +
     `- Project: ${opts.projectName ?? slug}\n` +
     `- Grouping mode: ${opts.groupingMode}\n` +
     `- Generated: ${metadata.generated_at}\n` +

@@ -104,9 +104,12 @@ export function ModeAlert({
   // CTA buttons across all three branches so the UX feels uniform.
   // unit-noun depends on whether the grouping units are user-defined zones
   // or cluster-derived sub-units.
-  const unitNoun = isDegenerateN2
-    ? (isClusterDerived ? 'cluster' : 'zone')
-    : 'zone';
+  // v4.x - prefer 'cluster' for any cluster-derived view (within-zone drill /
+  // sub-clusters), regardless of degeneracy. Previously the non-degenerate
+  // branch always returned 'zone', so on a cluster-derived view the
+  // image-level fallback banner said "zones" even when the grouping units
+  // were sub-clusters.
+  const unitNoun = isClusterDerived ? 'cluster' : 'zone';
   const unitNounPlural = `${unitNoun}s`;
 
   // Numeric phrasing for the K=1 vs K=2 split — singular for K=1, "Only N"
@@ -119,7 +122,7 @@ export function ModeAlert({
   const title = isDegenerateN2
     ? `Cross-${unitNoun} Charts Hidden — Only ${countLabel}`
     : isClusterDerived
-      ? 'Sub-Zone Mode'
+      ? 'Cluster Mode (Image-Level Fallback)'
       : 'Single-Zone (Image-Level) Mode';
 
   const body = isDegenerateN2
@@ -142,8 +145,8 @@ export function ModeAlert({
       </>
     )
     : isClusterDerived
-      ? `Falling back to image-level statistics on ${imageCount} GPS points (sub-zones derived from clustering, treated as zones).`
-      : `Cross-zone z-scores require ≥ 2 zones. With only ${zoneCount} zone${
+      ? `Falling back to image-level statistics on ${imageCount} GPS points (clusters derived from within-zone clustering, treated as grouping units).`
+      : `Cross-${unitNoun} z-scores require ≥ 2 ${unitNounPlural}. With only ${zoneCount} ${unitNoun}${
           zoneCount === 1 ? '' : 's'
         }, falling back to image-level statistics on ${imageCount} GPS points.`;
 

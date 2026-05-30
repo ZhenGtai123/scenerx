@@ -25,11 +25,17 @@ interface SectionHeadingProps {
 export function SectionHeading({ section, groupingMode = 'zones' }: SectionHeadingProps) {
   const meta = SECTION_META[section];
   const badgeText = meta.dataLevelByMode?.(groupingMode);
+  // v4.x - prefer mode-aware title/subtitle when defined (e.g. "Cluster-Level
+  // Findings" in clusters view instead of "Zone-Level Findings"). Falls back
+  // to the static title / subtitle for sections that don't overload zone
+  // semantics.
+  const displayTitle = meta.titleByMode?.(groupingMode) ?? meta.title;
+  const displaySubtitle = meta.subtitleByMode?.(groupingMode) ?? meta.subtitle;
   return (
     <Box mb={2} mt={2}>
       <HStack spacing={2} align="center" wrap="wrap">
         <Heading size="sm" color="gray.700">
-          {meta.title}
+          {displayTitle}
         </Heading>
         {badgeText && (
           <Badge
@@ -43,7 +49,7 @@ export function SectionHeading({ section, groupingMode = 'zones' }: SectionHeadi
         )}
       </HStack>
       <Text fontSize="xs" color="gray.500" mt={0.5}>
-        {meta.subtitle}
+        {displaySubtitle}
       </Text>
     </Box>
   );
