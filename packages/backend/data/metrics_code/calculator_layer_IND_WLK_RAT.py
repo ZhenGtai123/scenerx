@@ -1,7 +1,7 @@
 """Calculator Layer.
 
 Indicator ID:   IND_WLK_RAT
-Indicator Name: Visual Walkability Ratio
+Indicator Name: Visual Walkability Ratio (merged)
 Type:           TYPE B (two_class_ratio
 
 Formula: IND_WLK_RAT = (Pavement_pixels + Fence_pixels) / Road_pixels
@@ -20,7 +20,7 @@ from input_layer import semantic_colors
 # =============================================================================
 INDICATOR = {
     "id": "IND_WLK_RAT",
-    "name": "Visual Walkability Ratio",
+    "name": "Visual Walkability Ratio (merged)",
     "unit": "ratio",
     "formula": "(Sidewalk + Fence) / Road",
     "target_direction": "INCREASE",  # INCREASE / DECREASE / NEUTRAL

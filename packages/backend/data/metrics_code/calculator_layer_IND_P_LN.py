@@ -1,13 +1,13 @@
 """Calculator Layer.
 
-Indicator ID:   IND_FG_DEPTH_LV
-Indicator Name: Foreground Maximum Depth Value (P_LV)
+Indicator ID:   IND_P_LN
+Indicator Name: P_LN
 Type:           TYPE B (custom layer-aware)
 
 Description:
-    An absolute-value position metric: the maximum depth value across all pixels in the foreground, derived from monocular depth estimation grayscale (1-256). High values mean the foreground starts close to the observer; low values mean the foreground starts far from the observer.
+    An absolute-value position metric: the count of unique non-repeating depth values among pixels in the foreground, representing the vertical depth extent (range) of the foreground.
 
-Formula: P_LV = max_{i in Foreground} Di
+Formula: P_LN = sum_{i=1..N} Unique(Di)
 
 This calculator computes a non-ratio statistic (non-ratio statistic) over the raw
 RGB / semantic pixels of the image, optionally restricted to a spatial
@@ -21,15 +21,15 @@ from typing import Dict, Optional
 
 
 INDICATOR = {
-    "id": "IND_FG_DEPTH_LV",
-    "name": "Foreground Maximum Depth Value (P_LV)",
+    "id": "IND_P_LN",
+    "name": "P_LN",
     "unit": "%",
-    "formula": "P_LV = max_{i in Foreground} Di",
+    "formula": "P_LN = sum_{i=1..N} Unique(Di)",
     "target_direction": "NEUTRAL",
-    "definition": "An absolute-value position metric: the maximum depth value across all pixels in the foreground, derived from monocular depth estimation grayscale (1-256). High values mean the foreground starts close to the observer; low values mean the foreground starts far from the observer.",
+    "definition": "An absolute-value position metric: the count of unique non-repeating depth values among pixels in the foreground, representing the vertical depth extent (range) of the foreground.",
     "category": "CAT_CFG",
     "calc_type": "custom",
-    "variables": {"Di": "depth value (1-256 grayscale) of the i-th pixel in the foreground"},
+    "variables": {"Di": "depth value of the i-th pixel in the foreground (grayscale 1-256)", "Unique(Di)": "indicator that returns 1 only if Di is a non-repeating depth value within the foreground", "N": "total number of pixels in the foreground"},
     "confirmation_count": 1
 }
 
@@ -53,7 +53,7 @@ def _load_mask(mask_path: Optional[str], target_shape) -> Optional[np.ndarray]:
 
 
 def calculate_for_layer(image_path: str, mask_path: Optional[str] = None, original_photo_path: Optional[str] = None, depth_map_path: Optional[str] = None) -> Dict:
-    """Foreground Maximum Depth Value within mask."""
+    """Foreground Vertical Depth Length: count of distinct depth values in mask."""
     # v8.0 — orchestrator now ships the depth map alongside the
     # semantic map. This indicator reads depth pixel values, not class
     # labels, so a semantic map gives meaningless results. Prefer the
@@ -62,16 +62,15 @@ def calculate_for_layer(image_path: str, mask_path: Optional[str] = None, origin
         image_path = depth_map_path
     try:
         img = Image.open(image_path)
-        arr = np.array(img).astype(np.float64)
-        if arr.ndim == 3: arr = arr.mean(axis=2)
+        arr = np.array(img).astype(np.int32)
+        if arr.ndim == 3: arr = arr.mean(axis=2).astype(np.int32)
         mask = _load_mask(mask_path, arr.shape[:2])
         if mask is None:
             mask = np.ones(arr.shape[:2], dtype=bool)
         vals = arr[mask]
-        if len(vals) == 0:
-            return {'success': True, 'value': 0.0, 'target_pixels': 0, 'total_pixels': 0}
-        return {'success': True, 'value': float(vals.max()),
-                'target_pixels': int(mask.sum()), 'total_pixels': int(mask.size)}
+        unique = len(np.unique(vals))
+        return {'success': True, 'value': int(unique),
+                'target_pixels': unique, 'total_pixels': int(mask.sum())}
     except Exception as e:
         return {'success': False, 'value': None, 'error': str(e)}
 

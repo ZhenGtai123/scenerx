@@ -1,7 +1,7 @@
 """Calculator Layer.
 
-Indicator ID:   IND_FG_API
-Indicator Name: Foreground Asymmetry / Profile Index (S_API)
+Indicator ID:   IND_S_API
+Indicator Name: S_API
 Type:           TYPE B (custom layer-aware)
 
 Description:
@@ -21,8 +21,8 @@ from typing import Dict, Optional
 
 
 INDICATOR = {
-    "id": "IND_FG_API",
-    "name": "Foreground Asymmetry / Profile Index (S_API)",
+    "id": "IND_S_API",
+    "name": "S_API",
     "unit": "%",
     "formula": "S_API = sqrt( (1/N) * Sum_{i=1..N} (P_i - mu)^2 )",
     "target_direction": "NEUTRAL",

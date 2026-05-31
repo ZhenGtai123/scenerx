@@ -1,7 +1,7 @@
 """Calculator Layer.
 
-Indicator ID:   IND_FG_DEPTH_ECI
-Indicator Name: Foreground Depth Continuity Index (P_ECI)
+Indicator ID:   IND_P_ECI
+Indicator Name: P_ECI
 Type:           TYPE B (custom layer-aware)
 
 Description:
@@ -21,8 +21,8 @@ from typing import Dict, Optional
 
 
 INDICATOR = {
-    "id": "IND_FG_DEPTH_ECI",
-    "name": "Foreground Depth Continuity Index (P_ECI)",
+    "id": "IND_P_ECI",
+    "name": "P_ECI",
     "unit": "%",
     "formula": "P_ECI = sqrt( (1/N) * sum_j (CV_j - mu_CV)^2 ) / mu_CV ; CV_j = sqrt((1/Mj)*sum_i(Cij - mu_j)^2) / mu_j ; Cij = |idx_i - idx_{i+1}|",
     "target_direction": "NEUTRAL",

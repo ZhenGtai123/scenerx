@@ -1,7 +1,7 @@
 """Calculator Layer.
 
-Indicator ID:   IND_FG_ADI
-Indicator Name: Foreground Largest-Hole Asymmetry Index (S_ADI)
+Indicator ID:   IND_S_ADI
+Indicator Name: S_ADI
 Type:           TYPE B (custom layer-aware)
 
 Description:
@@ -21,8 +21,8 @@ from typing import Dict, Optional
 
 
 INDICATOR = {
-    "id": "IND_FG_ADI",
-    "name": "Foreground Largest-Hole Asymmetry Index (S_ADI)",
+    "id": "IND_S_ADI",
+    "name": "S_ADI",
     "unit": "%",
     "formula": "S_ADI = (SDi - SDj) / SDi ; SDi = sqrt((1/N)*sum_i(Ai - mu_i)^2) ; SDj = sqrt((1/N)*sum_{i!=max}(Ai - mu_w)^2)",
     "target_direction": "NEUTRAL",
@@ -80,7 +80,7 @@ def calculate_for_layer(image_path: str, mask_path: Optional[str] = None) -> Dic
             return {'success': True, 'value': round(adi, 4),
                     'target_pixels': int(layer_mask.sum()), 'total_pixels': int(layer_mask.size)}
         except ImportError:
-            return {'success': False, 'value': None, 'error': 'scipy required for IND_FG_ADI'}
+            return {'success': False, 'value': None, 'error': 'scipy required for IND_S_ADI'}
     except Exception as e:
         return {'success': False, 'value': None, 'error': str(e)}
 

@@ -7245,7 +7245,7 @@
       "unit": "dimensionless",
       "target_direction": "NEUTRAL"
     },
-    "IND_FG_ERI": {
+    "IND_S_ERI": {
       "name": "S_ERI",
       "definition": "A shape metric describing the irregularity of the foreground outline derived from semantic-segmented street/scenic images, based on the isoperimetric inequality. Compares the perimeter of the foreground region to the square root of its area; values near sqrt(2*pi) indicate circular outlines, values near 1 indicate square outlines, and larger values indicate increasingly irregular shapes.",
       "category": "CAT_CFG",
@@ -7339,7 +7339,7 @@
       "unit": "dimensionless",
       "target_direction": "NEUTRAL"
     },
-    "IND_FG_ECI": {
+    "IND_S_ECI": {
       "name": "S_ECI",
       "definition": "Measures how distinct the foreground is from its surrounding elements by checking element-label consistency of the 8-neighborhood for each pixel on the foreground outline. Values near 0 indicate the foreground is sharply distinguished from its surroundings; values near 1 indicate it blends with neighbors.",
       "category": "CAT_CFG",
@@ -7433,7 +7433,7 @@
       "unit": "ratio (0-1)",
       "target_direction": "NEUTRAL"
     },
-    "IND_FG_PSI": {
+    "IND_S_PSI": {
       "name": "S_PSI",
       "definition": "A distributional trend metric describing how similar in shape the multiple holes (open patches inside the foreground) are. Computed as the coefficient of variation of the perimeter-area shape descriptor (0.25*Pi/sqrt(Ai)) across all N holes. Zero means all holes are similar in shape; larger values mean increasingly dissimilar hole shapes.",
       "category": "CAT_CFG",
@@ -7529,7 +7529,7 @@
       "unit": "dimensionless",
       "target_direction": "NEUTRAL"
     },
-    "IND_FG_API": {
+    "IND_S_API": {
       "name": "S_API",
       "definition": "A distributional-trend metric describing the lateral asymmetry of the foreground outline relative to the vertical midline of the field of view, computed as the standard deviation of the per-row midpoints of the foreground outline's left/right pixel pairs about the field-of-view midline. Higher values indicate stronger left/right asymmetry of the foreground silhouette. (Lan et al. 2025, npj Heritage Science, Table 1)",
       "category": "CAT_CFG",
@@ -7626,7 +7626,7 @@
       "unit": "pixels",
       "target_direction": "NEUTRAL"
     },
-    "IND_FG_ADI": {
+    "IND_S_ADI": {
       "name": "S_ADI",
       "definition": "A relative-relationship metric capturing whether one hole inside the foreground dominates the others in size. Equal to (SDi - SDj)/SDi, where SDi is the standard deviation of all hole areas including the largest one and SDj is the standard deviation excluding the largest. Zero indicates the largest hole is similar in size to the rest; one indicates the largest hole dominates.",
       "category": "CAT_CFG",
@@ -8175,7 +8175,7 @@
       "unit": "dimensionless (relative depth)",
       "target_direction": "NEUTRAL"
     },
-    "IND_FG_DEPTH_LV": {
+    "IND_P_LV": {
       "name": "P_LV",
       "definition": "An absolute-value position metric: the maximum depth value across all pixels in the foreground, derived from monocular depth estimation grayscale (1-256). High values mean the foreground starts close to the observer; low values mean the foreground starts far from the observer.",
       "category": "CAT_CFG",
@@ -8268,7 +8268,7 @@
       "unit": "depth value (1-256, dimensionless)",
       "target_direction": "NEUTRAL"
     },
-    "IND_FG_DEPTH_LN": {
+    "IND_P_LN": {
       "name": "P_LN",
       "definition": "An absolute-value position metric: the count of unique non-repeating depth values among pixels in the foreground, representing the vertical depth extent (range) of the foreground.",
       "category": "CAT_CFG",
@@ -8363,7 +8363,7 @@
       "unit": "count",
       "target_direction": "NEUTRAL"
     },
-    "IND_FG_DEPTH_ECI": {
+    "IND_P_ECI": {
       "name": "P_ECI",
       "definition": "A distributional trend metric measuring how smoothly depth values transition across the foreground. Computed as the coefficient of variation of the per-row/column coefficients of variation of the absolute differences between depth values of neighboring-pixel pairs. Zero means depth values are continuously consistent; larger values mean abrupt depth jumps.",
       "category": "CAT_CFG",
@@ -8461,21 +8461,6 @@
       "unit": "dimensionless",
       "target_direction": "NEUTRAL"
     },
-    "IND_PLD_RIC": {
-      "name": "Plant Diversity — Richness count",
-      "definition": "Simple count of distinct plant strata or species.",
-      "category": "CAT_NAT",
-      "formula": "See calculator_layer_IND_PLD_RIC.py for implementation",
-      "variables": "",
-      "supporting_papers": [],
-      "first_confirmed_by": "",
-      "confirmation_count": "",
-      "svc_matrix_expansion": "",
-      "operational_alignment": "",
-      "formula_source": "",
-      "unit": "count",
-      "target_direction": "INCREASE"
-    },
     "IND_PLD_SHA": {
       "name": "Plant Diversity — Shannon entropy",
       "definition": "Shannon entropy H' over plant-class proportions.",
@@ -8489,21 +8474,6 @@
       "operational_alignment": "",
       "formula_source": "",
       "unit": "nats or bits (dimensionless)",
-      "target_direction": "INCREASE"
-    },
-    "IND_PLD_SIM": {
-      "name": "Plant Diversity — Simpson 1-D",
-      "definition": "Simpson (1-D) diversity over plant-class proportions.",
-      "category": "CAT_NAT",
-      "formula": "See calculator_layer_IND_PLD_SIM.py for implementation",
-      "variables": "",
-      "supporting_papers": [],
-      "first_confirmed_by": "",
-      "confirmation_count": "",
-      "svc_matrix_expansion": "",
-      "operational_alignment": "",
-      "formula_source": "",
-      "unit": "ratio (0-1)",
       "target_direction": "INCREASE"
     }
   },
@@ -28538,7 +28508,7 @@
   },
   "metadata": {
     "exported_at": "2026-03-17T00:00:00+00:00",
-    "total_codes": 746,
+    "total_codes": 744,
     "formula_count": 525,
     "extension_count": 1908,
     "variant_count": 21,

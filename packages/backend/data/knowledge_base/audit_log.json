@@ -41,17 +41,7 @@
       {
         "op": "create_stub",
         "from": null,
-        "to": "IND_PLD_RIC"
-      },
-      {
-        "op": "create_stub",
-        "from": null,
         "to": "IND_PLD_SHA"
-      },
-      {
-        "op": "create_stub",
-        "from": null,
-        "to": "IND_PLD_SIM"
       }
     ]
   },
@@ -479,10 +469,7 @@
     "rationale": "6 zero-evidence indicators handled: 2 kept as theoretical placeholders (PLD split-siblings), 4 got L15-style stub evidence created from supporting_papers refs.",
     "consensus_pass": "3/3 (rule-based: Pass A supporting_papers exist; B is_split_child; C concept used)",
     "stats": {
-      "kept_placeholders": [
-        "IND_PLD_RIC",
-        "IND_PLD_SIM"
-      ],
+      "kept_placeholders": [],
       "stubs_created": 4,
       "new_evidence_ids": [
         "SVCs_P_Li2018_ENC_BLD_L15",
@@ -527,10 +514,7 @@
     "consensus_pass": "N/A — observational documentation only",
     "decision": "KEEP — natural literature reality",
     "stats": {
-      "still_zero_evidence": [
-        "IND_PLD_RIC",
-        "IND_PLD_SIM"
-      ],
+      "still_zero_evidence": [],
       "one_evidence_count": 62,
       "two_evidence_count": 10
     }
@@ -552,15 +536,9 @@
     "action": "Z1_remove_evidence_note_field",
     "rationale": "Platform code (backend + frontend) has 0 references to evidence_note. Removing to comply with \"no new fields\" policy. Information preserved in audit_log X2 entry.",
     "consensus_pass": "3/3 (Pass A: grep backend; B: grep frontend; C: Pydantic models)",
-    "removed_from": [
-      "IND_PLD_RIC",
-      "IND_PLD_SIM"
-    ],
+    "removed_from": [],
     "preserved_in_log_action": "X2_zero_evidence_indicators",
-    "note_content_preserved": {
-      "IND_PLD_RIC": "Theoretical sibling of IND_PLD_SHA; alternative diversity formula (Q-stage split decision).",
-      "IND_PLD_SIM": "Theoretical sibling of IND_PLD_SHA; alternative diversity formula (Q-stage split decision)."
-    }
+    "note_content_preserved": {}
   },
   {
     "timestamp": "2026-05-13T10:41:13.031214Z",

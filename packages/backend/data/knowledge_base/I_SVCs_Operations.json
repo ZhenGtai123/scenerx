@@ -32947,12 +32947,12 @@
     "linked_evidence_id": "SVCs_P_Lan2025_FG_ERI_L15",
     "inference_source": "discussion",
     "source_indicator": {
-      "indicator_id": "IND_FG_ERI",
+      "indicator_id": "IND_S_ERI",
       "current_value": "High",
       "target_value": "Low",
       "indicator_name": "S_ERI (S_ERI)",
       "svc_matrix_expansion_ref": {
-        "indicator_id": "IND_FG_ERI",
+        "indicator_id": "IND_S_ERI",
         "semantic_layer_scope": [
           "OBJ_VEG",
           "OBJ_BLT",
@@ -33032,7 +33032,7 @@
     },
     "predicted_effect": {
       "indicator_effect": {
-        "indicator_id": "IND_FG_ERI",
+        "indicator_id": "IND_S_ERI",
         "direction": "decrease",
         "magnitude": "94.12",
         "type": "qualitative",
@@ -33061,12 +33061,12 @@
     "linked_evidence_id": "SVCs_P_Lan2025_FG_ECI_L15",
     "inference_source": "extrapolation",
     "source_indicator": {
-      "indicator_id": "IND_FG_ECI",
+      "indicator_id": "IND_S_ECI",
       "current_value": "High",
       "target_value": "Low",
       "indicator_name": "S_ECI (S_ECI)",
       "svc_matrix_expansion_ref": {
-        "indicator_id": "IND_FG_ECI",
+        "indicator_id": "IND_S_ECI",
         "semantic_layer_scope": [
           "OBJ_VEG",
           "OBJ_BLT",
@@ -33146,7 +33146,7 @@
     },
     "predicted_effect": {
       "indicator_effect": {
-        "indicator_id": "IND_FG_ECI",
+        "indicator_id": "IND_S_ECI",
         "direction": "unspecified",
         "magnitude": "94.12",
         "type": "qualitative",
@@ -33175,12 +33175,12 @@
     "linked_evidence_id": "SVCs_P_Lan2025_FG_PSI_L15",
     "inference_source": "extrapolation",
     "source_indicator": {
-      "indicator_id": "IND_FG_PSI",
+      "indicator_id": "IND_S_PSI",
       "current_value": "Low",
       "target_value": "High",
       "indicator_name": "S_PSI (S_PSI)",
       "svc_matrix_expansion_ref": {
-        "indicator_id": "IND_FG_PSI",
+        "indicator_id": "IND_S_PSI",
         "semantic_layer_scope": [
           "OBJ_VEG",
           "OBJ_BLT",
@@ -33260,7 +33260,7 @@
     },
     "predicted_effect": {
       "indicator_effect": {
-        "indicator_id": "IND_FG_PSI",
+        "indicator_id": "IND_S_PSI",
         "direction": "unspecified",
         "magnitude": "94.12",
         "type": "qualitative",
@@ -33289,12 +33289,12 @@
     "linked_evidence_id": "SVCs_P_Lan2025_FG_API_L15",
     "inference_source": "discussion",
     "source_indicator": {
-      "indicator_id": "IND_FG_API",
+      "indicator_id": "IND_S_API",
       "current_value": "High",
       "target_value": "Low",
       "indicator_name": "S_API (S_API)",
       "svc_matrix_expansion_ref": {
-        "indicator_id": "IND_FG_API",
+        "indicator_id": "IND_S_API",
         "semantic_layer_scope": [
           "OBJ_VEG",
           "OBJ_BLT",
@@ -33374,7 +33374,7 @@
     },
     "predicted_effect": {
       "indicator_effect": {
-        "indicator_id": "IND_FG_API",
+        "indicator_id": "IND_S_API",
         "direction": "unspecified",
         "magnitude": "94.12",
         "type": "qualitative",
@@ -33403,12 +33403,12 @@
     "linked_evidence_id": "SVCs_P_Lan2025_FG_ADI_L15",
     "inference_source": "extrapolation",
     "source_indicator": {
-      "indicator_id": "IND_FG_ADI",
+      "indicator_id": "IND_S_ADI",
       "current_value": "High",
       "target_value": "Low",
       "indicator_name": "S_ADI (S_ADI)",
       "svc_matrix_expansion_ref": {
-        "indicator_id": "IND_FG_ADI",
+        "indicator_id": "IND_S_ADI",
         "semantic_layer_scope": [
           "OBJ_VEG",
           "OBJ_BLT",
@@ -33488,7 +33488,7 @@
     },
     "predicted_effect": {
       "indicator_effect": {
-        "indicator_id": "IND_FG_ADI",
+        "indicator_id": "IND_S_ADI",
         "direction": "decrease",
         "magnitude": "94.12",
         "type": "qualitative",
@@ -33978,12 +33978,12 @@
     "linked_evidence_id": "SVCs_P_Lan2025_FG_DEPTH_LV_L15",
     "inference_source": "extrapolation",
     "source_indicator": {
-      "indicator_id": "IND_FG_DEPTH_LV",
+      "indicator_id": "IND_P_LV",
       "current_value": "Unspecified",
       "target_value": "Unspecified",
       "indicator_name": "P_LV (P_LV)",
       "svc_matrix_expansion_ref": {
-        "indicator_id": "IND_FG_DEPTH_LV",
+        "indicator_id": "IND_P_LV",
         "semantic_layer_scope": [
           "OBJ_VEG",
           "OBJ_BLT",
@@ -34063,7 +34063,7 @@
     },
     "predicted_effect": {
       "indicator_effect": {
-        "indicator_id": "IND_FG_DEPTH_LV",
+        "indicator_id": "IND_P_LV",
         "direction": "increase",
         "magnitude": "94.12",
         "type": "qualitative",
@@ -34092,12 +34092,12 @@
     "linked_evidence_id": "SVCs_P_Lan2025_FG_DEPTH_LN_L15",
     "inference_source": "extrapolation",
     "source_indicator": {
-      "indicator_id": "IND_FG_DEPTH_LN",
+      "indicator_id": "IND_P_LN",
       "current_value": "Unspecified",
       "target_value": "Unspecified",
       "indicator_name": "P_LN (P_LN)",
       "svc_matrix_expansion_ref": {
-        "indicator_id": "IND_FG_DEPTH_LN",
+        "indicator_id": "IND_P_LN",
         "semantic_layer_scope": [
           "OBJ_VEG",
           "OBJ_BLT",
@@ -34177,7 +34177,7 @@
     },
     "predicted_effect": {
       "indicator_effect": {
-        "indicator_id": "IND_FG_DEPTH_LN",
+        "indicator_id": "IND_P_LN",
         "direction": "increase",
         "magnitude": "94.12",
         "type": "qualitative",
@@ -34206,12 +34206,12 @@
     "linked_evidence_id": "SVCs_P_Lan2025_FG_DEPTH_ECI_L15",
     "inference_source": "discussion",
     "source_indicator": {
-      "indicator_id": "IND_FG_DEPTH_ECI",
+      "indicator_id": "IND_P_ECI",
       "current_value": "Unspecified",
       "target_value": "Unspecified",
       "indicator_name": "P_ECI (P_ECI)",
       "svc_matrix_expansion_ref": {
-        "indicator_id": "IND_FG_DEPTH_ECI",
+        "indicator_id": "IND_P_ECI",
         "semantic_layer_scope": [
           "OBJ_VEG",
           "OBJ_BLT",
@@ -34291,7 +34291,7 @@
     },
     "predicted_effect": {
       "indicator_effect": {
-        "indicator_id": "IND_FG_DEPTH_ECI",
+        "indicator_id": "IND_P_ECI",
         "direction": "increase",
         "magnitude": "94.12",
         "type": "qualitative",

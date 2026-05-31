@@ -1,7 +1,7 @@
 """Calculator Layer.
 
-Indicator ID:   IND_FG_ERI
-Indicator Name: Foreground Edge Roughness Index (S_ERI)
+Indicator ID:   IND_S_ERI
+Indicator Name: S_ERI
 Type:           TYPE B (custom layer-aware)
 
 Description:
@@ -21,8 +21,8 @@ from typing import Dict, Optional
 
 
 INDICATOR = {
-    "id": "IND_FG_ERI",
-    "name": "Foreground Edge Roughness Index (S_ERI)",
+    "id": "IND_S_ERI",
+    "name": "S_ERI",
     "unit": "%",
     "formula": "S_ERI = 0.25 * P / sqrt(A)",
     "target_direction": "NEUTRAL",

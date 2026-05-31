@@ -1,5 +1,5 @@
 # -----------------------------------------------------------------------------
-# SceneRx Backend — pinned for reproducibility
+# SceneRx Backend - pinned for reproducibility
 # Frozen from a working venv on 2026-04-30. Bump deliberately, then re-test.
 # To regenerate after upgrades:  pip freeze > requirements.lock.txt
 # -----------------------------------------------------------------------------

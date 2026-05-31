@@ -1,7 +1,7 @@
 """Calculator Layer.
 
-Indicator ID:   IND_FG_ECI
-Indicator Name: Foreground Edge Contrast Index (S_ECI)
+Indicator ID:   IND_S_ECI
+Indicator Name: S_ECI
 Type:           TYPE B (custom layer-aware)
 
 Description:
@@ -21,8 +21,8 @@ from typing import Dict, Optional
 
 
 INDICATOR = {
-    "id": "IND_FG_ECI",
-    "name": "Foreground Edge Contrast Index (S_ECI)",
+    "id": "IND_S_ECI",
+    "name": "S_ECI",
     "unit": "%",
     "formula": "S_ECI = Pb / (Py + Pb)",
     "target_direction": "NEUTRAL",
