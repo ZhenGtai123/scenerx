@@ -40,24 +40,6 @@ async def _save_masks_to_project(
             path = mask_dir / f"{key}.png"
             path.write_bytes(data)
             saved[key] = str(path)
-
-    # Metric depth (true meters, float32) as raw .npy — stored for depth
-    # indicators to read later. Not yet consumed by the calculators (they
-    # still read depth_map.png); this only persists the file + path.
-    if isinstance(response.depth_metric_npy, bytes) and len(response.depth_metric_npy) > 0:
-        npy_path = mask_dir / "depth_metric.npy"
-        npy_path.write_bytes(response.depth_metric_npy)
-        saved["depth_metric"] = str(npy_path)
-
-    # Pipeline metadata (depth_stats / fmb_thresholds / config).
-    if response.metadata:
-        meta_path = mask_dir / "metadata.json"
-        meta_path.write_text(
-            json.dumps(response.metadata, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
-        saved["metadata"] = str(meta_path)
-
     return saved
 
 

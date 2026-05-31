@@ -42,15 +42,6 @@ class VisionAnalysisResponse(BaseModel):
     # Image data (bytes from Vision API — excluded from JSON serialization)
     images: dict[str, Any] = Field(default_factory=dict, exclude=True)
 
-    # Metric depth: raw .npy bytes (float32 meters) decoded from the Vision
-    # API's base64 `depth_metric_npy` field. Excluded from JSON serialization
-    # (binary). None when the depth backend produced no metric depth.
-    depth_metric_npy: Optional[bytes] = Field(default=None, exclude=True)
-
-    # Pipeline metadata dict (depth_stats / fmb_thresholds / config). Saved to
-    # disk as metadata.json alongside the masks.
-    metadata: dict = Field(default_factory=dict)
-
     # Mask file paths (populated after saving masks to disk)
     mask_paths: dict[str, str] = Field(default_factory=dict)
 
