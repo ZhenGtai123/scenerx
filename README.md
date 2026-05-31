@@ -11,11 +11,14 @@
 
 ```bash
 git clone https://github.com/ZhenGtai123/scenerx.git
-cd scenerx && cp .env.example .env       # paste an LLM key now, or later in the Settings UI
-docker compose up -d                      # CPU stack; add --profile gpu for local vision-api
+cd scenerx
+cp .env.example .env        # one-time, no editing needed — config is done in the UI
+docker compose up -d        # add --profile gpu to also run the vision-api container locally (needs NVIDIA GPU)
 ```
 
-Open **http://localhost:3000** — that's it. All runtime config (LLM key, vision URL, model) lives in the Settings page; no more .env edits after this.
+Open **http://localhost:3000** in your browser.
+
+> **Configure everything in the Settings page** — LLM provider, API key, model name, and `VISION_API_URL` all live on the in-app Settings page and persist to `.env` automatically. You never need to edit `.env` by hand. The bundled `.env.example` is only used to create the empty `.env` the backend's auto-save targets.
 
 This repository offers **three reproducibility paths**, in increasing order of effort:
 
@@ -49,33 +52,13 @@ This demo runs the **vision pipeline only** (Stage 2). For zone analysis, indica
 
 ### Steps
 
+Same as the Quickstart above. For paper figure reproduction, use the GPU profile so vision-api runs locally:
+
 ```bash
-git clone https://github.com/ZhenGtai123/scenerx.git
-cd scenerx
-cp .env.example .env
-# Optional: pre-fill one *_API_KEY in .env. You can also leave it blank
-# and paste the key into the Settings page after the stack is up.
-docker compose up -d                       # CPU-only stack (point .env at remote VISION_API_URL)
-docker compose --profile gpu up -d         # full stack with local vision-api (needs NVIDIA GPU)
+docker compose --profile gpu up -d
 ```
 
-> Linux/macOS shortcut: `make reproduce` does the same as the second form plus a health-wait. Windows users without `make` should run the `docker compose` command directly.
-
-First run takes ~15–25 min for the GPU profile (model weights download into a cached volume). Subsequent runs are < 30 s.
-
-### Configuring at runtime (no .env edits needed)
-
-The Settings page at **http://localhost:3000/settings** is the canonical place
-to change any of the following without touching files or restarting containers:
-
-- LLM provider (Gemini / OpenAI / Anthropic / DeepSeek) and its API key
-- Per-provider model name
-- `VISION_API_URL` — point at a remote vision endpoint or a local one
-
-The page writes through to the same `.env` the backend already reads and
-resets the in-memory client singletons, so changes take effect immediately
-for the next API call. The `.env` file then becomes a one-time
-**bootstrap** mechanism rather than a configuration surface to maintain.
+First run takes ~15–25 min for the GPU profile (model weights download into a cached volume). Subsequent runs are under 30 s. Linux/macOS shortcut: `make reproduce`.
 
 Then open **http://localhost:3000** and:
 

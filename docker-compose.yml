@@ -119,6 +119,10 @@ services:
       - ./packages/backend/data:/app/data
       - ./packages/backend/outputs:/app/outputs
       - ./packages/backend/temp:/app/temp
+      # Mount root .env so Settings UI writes (LLM key, vision URL,
+      # model name) persist on the host and survive `docker compose down`.
+      # Backend's _find_env_file() picks up /app/.env first when present.
+      - ./.env:/app/.env
     ports:
       - "8080:8080"
     depends_on:
@@ -154,6 +158,7 @@ services:
       - ./packages/backend/data:/app/data
       - ./packages/backend/outputs:/app/outputs
       - ./packages/backend/temp:/app/temp
+      - ./.env:/app/.env
     depends_on:
       - backend
     restart: unless-stopped
