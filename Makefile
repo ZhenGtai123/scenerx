@@ -29,9 +29,18 @@ help: ## Show this help.
 # -----------------------------------------------------------------------------
 up: .env ## Start everything except vision-api (use a remote VISION_API_URL).
 	$(COMPOSE) up -d
+	@echo ""
+	@echo "  Frontend:  http://localhost:3000"
+	@echo "  Backend:   http://localhost:8080"
+	@echo ""
+	@echo "  Settings UI: http://localhost:3000/settings  (set VISION_API_URL here)"
 
 up-gpu: .env ## Start everything including local vision-api (requires NVIDIA GPU).
 	$(COMPOSE_GPU) up -d
+	@echo ""
+	@echo "  Frontend:    http://localhost:3000"
+	@echo "  Backend:     http://localhost:8080"
+	@echo "  Vision API:  http://localhost:8000  (also reachable in-network as http://vision-api:8000)"
 
 reproduce: .env ## Pull pinned images and bring up the full stack for paper reproduction.
 	$(COMPOSE_GPU) pull
