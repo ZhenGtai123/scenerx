@@ -13,4 +13,23 @@ export default defineConfig({
       },
     },
   },
+  build: {
+    // Main chunk was 1.6 MB before splitting because Recharts + Chakra +
+    // jspdf + xlsx + html2canvas all rolled into index.js. Manual chunks
+    // keep heavy export/visualization deps in their own files so the
+    // initial route doesn't pay for them.
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          'vendor-react': ['react', 'react-dom', 'react-router-dom'],
+          'vendor-chakra': ['@chakra-ui/react', '@emotion/react', '@emotion/styled', 'framer-motion'],
+          'vendor-charts': ['recharts'],
+          'vendor-export-pdf': ['jspdf', 'html2canvas', 'jszip'],
+          'vendor-export-xlsx': ['xlsx'],
+          'vendor-query': ['@tanstack/react-query', 'zustand'],
+        },
+      },
+    },
+    chunkSizeWarningLimit: 800,
+  },
 })

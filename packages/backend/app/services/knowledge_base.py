@@ -321,8 +321,16 @@ class KnowledgeBase:
         return self.appendix.get(section)
 
     def get_indicator_definitions(self) -> list[dict]:
-        """Get indicator definitions from codebook"""
-        return self.appendix.get('A_indicators', [])
+        """Get indicator definitions from codebook.
+
+        Appendix stores A_indicators as a dict keyed by indicator id
+        ({"IND_GVI": {...}, ...}). The id is injected into each record
+        so callers don't lose it when flattened to a list.
+        """
+        raw = self.appendix.get('A_indicators', [])
+        if isinstance(raw, dict):
+            return [{"id": k, **v} for k, v in raw.items() if isinstance(v, dict)]
+        return raw if isinstance(raw, list) else []
 
     def is_recommendable(self, indicator_id: str) -> bool:
         """Whether an indicator may be offered by the recommender.
@@ -349,12 +357,18 @@ class KnowledgeBase:
         return str(entry.get('status', 'active')).strip().lower() == 'active'
 
     def get_performance_dimensions(self) -> list[dict]:
-        """Get performance dimensions from codebook"""
-        return self.appendix.get('C_performance', [])
+        """Get performance dimensions from codebook. See get_indicator_definitions for shape note."""
+        raw = self.appendix.get('C_performance', [])
+        if isinstance(raw, dict):
+            return [{"id": k, **v} for k, v in raw.items() if isinstance(v, dict)]
+        return raw if isinstance(raw, list) else []
 
     def get_subdimensions(self) -> list[dict]:
-        """Get subdimensions from codebook"""
-        return self.appendix.get('C_subdimensions', [])
+        """Get subdimensions from codebook. See get_indicator_definitions for shape note."""
+        raw = self.appendix.get('C_subdimensions', [])
+        if isinstance(raw, dict):
+            return [{"id": k, **v} for k, v in raw.items() if isinstance(v, dict)]
+        return raw if isinstance(raw, list) else []
 
     def query_evidence(
         self,

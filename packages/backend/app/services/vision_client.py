@@ -3,6 +3,7 @@ Vision Model API Client
 Async HTTP client for communicating with the Vision API backend
 """
 
+import base64
 import json
 import io
 import time
@@ -16,6 +17,21 @@ from PIL import Image as PILImage
 from app.models.vision import VisionAnalysisRequest, VisionAnalysisResponse
 
 logger = logging.getLogger(__name__)
+
+
+def _decode_depth_metric(b64: Optional[str]) -> Optional[bytes]:
+    """Decode the Vision API's base64 `depth_metric_npy` field to raw .npy bytes.
+
+    Returns the bytes ready to write to a `.npy` file (np.load can read them
+    back). Returns None when the field is empty/missing or undecodable.
+    """
+    if not b64 or not isinstance(b64, str):
+        return None
+    try:
+        return base64.b64decode(b64)
+    except Exception as e:
+        logger.warning("Failed to decode depth_metric_npy: %s", e)
+        return None
 
 
 class VisionModelClient:
@@ -275,6 +291,10 @@ class VisionModelClient:
                             if isinstance(hex_data, str):
                                 processed_images[key] = bytes.fromhex(hex_data)
 
+                    # Metric depth (.npy bytes) + metadata dict, when present
+                    depth_metric_npy = _decode_depth_metric(result.get('depth_metric_npy'))
+                    metadata = result.get('metadata') or {}
+
                     # 检查 Vision API 返回的语义分割状态
                     sem_status = result.get('semantic_status', 'unknown')
                     if sem_status == 'failed':
@@ -297,6 +317,8 @@ class VisionModelClient:
                             'semantic_status': sem_status,
                         },
                         images=processed_images,
+                        depth_metric_npy=depth_metric_npy,
+                        metadata=metadata,
                         instances=result.get('instances', []),
                     )
                 else:
@@ -396,6 +418,8 @@ class VisionModelClient:
                                 'fmb_statistics': view_data.get('fmb_statistics', {}),
                             },
                             images=processed_images,
+                            depth_metric_npy=_decode_depth_metric(view_data.get('depth_metric_npy')),
+                            metadata=view_data.get('metadata') or {},
                             instances=view_data.get('instances', []),
                         )
                     return views
