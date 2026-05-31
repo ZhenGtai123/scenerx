@@ -1,7 +1,7 @@
 """Calculator Layer.
 
-Indicator ID:   IND_FG_PSI
-Indicator Name: Foreground Hole-Shape Similarity Index (S_PSI)
+Indicator ID:   IND_S_PSI
+Indicator Name: S_PSI
 Type:           TYPE B (custom layer-aware)
 
 Description:
@@ -21,8 +21,8 @@ from typing import Dict, Optional
 
 
 INDICATOR = {
-    "id": "IND_FG_PSI",
-    "name": "Foreground Hole-Shape Similarity Index (S_PSI)",
+    "id": "IND_S_PSI",
+    "name": "S_PSI",
     "unit": "%",
     "formula": "S_PSI = sqrt( (1/N) * sum_i ( (0.25*Pi/sqrt(Ai)) - mu )^2 ) / mu , where mu = (1/N) sum_i (0.25*Pi/sqrt(Ai))",
     "target_direction": "NEUTRAL",
