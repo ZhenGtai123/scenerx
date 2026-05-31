@@ -7,6 +7,16 @@
 
 > Companion code for *SceneRx: An AI-Augmented Pipeline for Urban Greenspace Performance Diagnosis* (in preparation). Upload site photos → AI segmentation + depth → environmental indicators → zone diagnostics → LLM-generated design strategies.
 
+## Quickstart
+
+```bash
+git clone https://github.com/ZhenGtai123/scenerx.git
+cd scenerx && cp .env.example .env       # paste an LLM key now, or later in the Settings UI
+docker compose up -d                      # CPU stack; add --profile gpu for local vision-api
+```
+
+Open **http://localhost:3000** — that's it. All runtime config (LLM key, vision URL, model) lives in the Settings page; no more .env edits after this.
+
 This repository offers **three reproducibility paths**, in increasing order of effort:
 
 | Path | Audience | Hardware | Setup time |
@@ -164,15 +174,12 @@ figure, this app, and the sibling `AI_City_View` vision service.
 
 ## Manual setup (development)
 
-For backend / frontend code work without Docker.
+If you're editing backend or frontend code, skip Docker and run the two
+services on the host. Prerequisites: Python 3.11+, Node.js 18+, an LLM
+API key, and a Vision API endpoint (local or remote).
 
 ```bash
-# Prerequisites: Python 3.11+, Node.js 18+, an LLM API key, and a Vision API endpoint.
-
-# One .env at the repo root is shared between docker-compose and a local
-# (non-docker) backend. The backend's _find_env_file() searches first under
-# packages/backend/ and then falls back to the root copy.
-cp .env.example .env              # at repo root; edit, or leave blank and use Settings UI later
+cp .env.example .env              # root-level .env — backend reads it via _find_env_file()
 
 # Backend
 cd packages/backend
