@@ -9,10 +9,26 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 def _find_env_file() -> str:
-    """Locate the .env file relative to this config module (backend/.env)."""
+    """Locate the .env file.
+
+    Lookup order:
+      1. packages/backend/.env   — local-dev override, if present.
+      2. <repo root>/.env        — the single source of truth shared with docker-compose.
+      3. ".env"                  — final fallback (cwd-relative).
+
+    Returning the first existing file means a developer running the
+    backend directly picks up the same keys docker-compose would use,
+    so users don't need three separate .env copies.
+    """
     backend_dir = Path(__file__).resolve().parent.parent.parent
-    env_path = backend_dir / ".env"
-    return str(env_path) if env_path.exists() else ".env"
+    candidates = [
+        backend_dir / ".env",
+        backend_dir.parent.parent / ".env",
+    ]
+    for p in candidates:
+        if p.exists():
+            return str(p)
+    return ".env"
 
 
 class Settings(BaseSettings):

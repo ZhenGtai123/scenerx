@@ -91,6 +91,7 @@ export function SettingsContent({ embedded = false }: SettingsContentProps) {
   const [visionUrlInput, setVisionUrlInput] = useState('');
   const [savingVisionUrl, setSavingVisionUrl] = useState(false);
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- Hydrate input from async server config; the input then becomes user-editable state, so a derived useMemo would not let the user override.
     if (config?.vision_api_url) setVisionUrlInput(config.vision_api_url);
   }, [config?.vision_api_url]);
 
@@ -98,6 +99,7 @@ export function SettingsContent({ embedded = false }: SettingsContentProps) {
 
   useEffect(() => {
     if (activeProvider?.current_model) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- Hydrate model picker from server's currently active provider; user edits the field afterward.
       setCustomModel(activeProvider.current_model);
     }
   }, [activeProvider?.current_model]);

@@ -177,6 +177,7 @@ export function AiReportProgress({ state }: Props) {
     const isActive =
       state.kind !== 'idle' && state.kind !== 'done' && state.kind !== 'error';
     if (isActive && startedAt === null) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- One-shot startedAt initialization on the idle→active edge; we need the actual transition timestamp, which can't be a render-time derived value.
       setStartedAt(Date.now());
     } else if (!isActive && startedAt !== null) {
       // Keep the final elapsed shown briefly via the `done`/`error` rendering;

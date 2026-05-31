@@ -6,6 +6,7 @@ import { X, Undo2, MapPin } from 'lucide-react';
 /*  Thumbnail URL builder                                              */
 /* ------------------------------------------------------------------ */
 
+// eslint-disable-next-line react-refresh/only-export-components -- Co-located with ZoneTile because the URL shape is part of the tile's contract; splitting to a separate file would obscure that.
 export function thumbnailUrl(projectId: string, imageId: string, size = 160): string {
   return `/api/projects/${projectId}/images/${imageId}/thumbnail?size=${size}`;
 }

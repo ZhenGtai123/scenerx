@@ -1,3 +1,8 @@
+// File mixes a hook (useTaskProgress) with the toast body component it renders.
+// Splitting them would just move TaskProgressBody to its own file even though
+// it is only ever instantiated from this hook's toast.update() calls.
+/* eslint-disable react-refresh/only-export-components */
+
 /**
  * useTaskProgress
  * ---------------

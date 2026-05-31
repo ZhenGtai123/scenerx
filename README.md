@@ -43,11 +43,29 @@ This demo runs the **vision pipeline only** (Stage 2). For zone analysis, indica
 git clone https://github.com/ZhenGtai123/scenerx.git
 cd scenerx
 cp .env.example .env
-# edit .env — at minimum, fill in one *_API_KEY
-make reproduce        # pulls pinned images + brings the stack up + waits for health
+# Optional: pre-fill one *_API_KEY in .env. You can also leave it blank
+# and paste the key into the Settings page after the stack is up.
+docker compose up -d                       # CPU-only stack (point .env at remote VISION_API_URL)
+docker compose --profile gpu up -d         # full stack with local vision-api (needs NVIDIA GPU)
 ```
 
-`make reproduce` is equivalent to `docker compose --profile gpu pull && docker compose --profile gpu up -d`. First run takes ~15–25 min (model weights download into a cached volume). Subsequent runs are < 30 s.
+> Linux/macOS shortcut: `make reproduce` does the same as the second form plus a health-wait. Windows users without `make` should run the `docker compose` command directly.
+
+First run takes ~15–25 min for the GPU profile (model weights download into a cached volume). Subsequent runs are < 30 s.
+
+### Configuring at runtime (no .env edits needed)
+
+The Settings page at **http://localhost:3000/settings** is the canonical place
+to change any of the following without touching files or restarting containers:
+
+- LLM provider (Gemini / OpenAI / Anthropic / DeepSeek) and its API key
+- Per-provider model name
+- `VISION_API_URL` — point at a remote vision endpoint or a local one
+
+The page writes through to the same `.env` the backend already reads and
+resets the in-memory client singletons, so changes take effect immediately
+for the next API call. The `.env` file then becomes a one-time
+**bootstrap** mechanism rather than a configuration surface to maintain.
 
 Then open **http://localhost:3000** and:
 
@@ -151,12 +169,16 @@ For backend / frontend code work without Docker.
 ```bash
 # Prerequisites: Python 3.11+, Node.js 18+, an LLM API key, and a Vision API endpoint.
 
+# One .env at the repo root is shared between docker-compose and a local
+# (non-docker) backend. The backend's _find_env_file() searches first under
+# packages/backend/ and then falls back to the root copy.
+cp .env.example .env              # at repo root; edit, or leave blank and use Settings UI later
+
 # Backend
 cd packages/backend
 python -m venv venv
 source venv/bin/activate          # Windows: venv\Scripts\activate
 pip install -r requirements.txt
-cp .env.example .env              # edit
 python -m app.main                # http://localhost:8080
 
 # Frontend (separate terminal)

@@ -56,6 +56,7 @@ function GlobalPipelineProgress() {
   const etaSeconds = useMemo(() => {
     const { imageProgress, startedAt } = pipelineRun;
     if (!imageProgress || !startedAt || imageProgress.current === 0) return null;
+    // eslint-disable-next-line react-hooks/purity -- ETA only recomputes when pipelineRun changes, so Date.now() reads at well-defined moments (progress events), not on every render.
     const elapsed = (Date.now() - startedAt) / 1000;
     const perImage = elapsed / imageProgress.current;
     const remaining = imageProgress.total - imageProgress.current;

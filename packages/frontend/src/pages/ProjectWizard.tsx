@@ -190,6 +190,7 @@ function ProjectWizard() {
   // When a parent performance dimension is unchecked, drop any of its sub-dimensions
   // so we never persist orphan PRS_* codes whose PRF_* parent is not selected.
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- We're pruning subdimensions whose parent was just unchecked; the result is real persisted state the user can re-toggle, not a derived render value, so useMemo would not fit.
     setSelectedSubdimensions((prev) => {
       if (prev.length === 0) return prev;
       const allowedParents = new Set(selectedDimensions);
@@ -204,6 +205,7 @@ function ProjectWizard() {
   // Load existing project data in edit mode
   useEffect(() => {
     if (isEditMode && projectId) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- Sync external system (server-side project) into form state on mount; cannot be a derived value.
       setLoading(true);
       api.projects.get(projectId)
         .then((res) => {
@@ -302,6 +304,7 @@ function ProjectWizard() {
   // never persist dangling from_zone / to_zone ids to the API.
   useEffect(() => {
     const validIds = new Set(zones.map(z => z.id));
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- Pruning relations whose endpoint zone was just deleted; the result is real persisted state, not a derived render value.
     setRelations(prev => {
       const filtered = prev.filter(r => validIds.has(r.from_zone) && validIds.has(r.to_zone));
       return filtered.length === prev.length ? prev : filtered;

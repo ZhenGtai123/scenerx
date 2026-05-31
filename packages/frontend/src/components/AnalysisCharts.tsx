@@ -70,7 +70,10 @@ interface RadarProfileChartProps {
 
 /** v4 polish — exposed so parents (e.g. registry.tsx B3) can render a
  *  single shared legend using the same color mapping the small-multiples
- *  panels use. Stable across renders for a given zone index. */
+ *  panels use. Stable across renders for a given zone index.
+ *  Co-locating this helper with the chart components is intentional —
+ *  splitting it out would just create a 1-line wrapper file. */
+// eslint-disable-next-line react-refresh/only-export-components
 export function radarProfileColor(index: number): string {
   return getZoneColor(index);
 }
@@ -403,6 +406,7 @@ export function ZonePriorityChart({ diagnostics }: ZonePriorityChartProps) {
           <LabelList
             dataKey="mean_abs_z"
             position="right"
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Recharts' LabelContentType is too strict; we accept the loose prop bag and validate inside.
             content={(props: any) => {
               const x = Number(props.x); const y = Number(props.y);
               const w = Number(props.width); const h = Number(props.height);
@@ -1520,10 +1524,8 @@ export function WithinZoneImageDistribution({ imageRecords, indicatorDefs }: Wit
       .sort((a, b) => a.name.localeCompare(b.name));
   }, [imageRecords]);
 
-  if (indicatorIds.length === 0 || zoneList.length === 0) {
-    return null;
-  }
-
+  // hasSmallSample must be computed BEFORE any early return so the hook
+  // call order stays stable across renders (rules-of-hooks).
   const hasSmallSample = useMemo(() => {
     for (const ind of indicatorIds) {
       for (const layer of DD_LAYERS) {
@@ -1537,6 +1539,10 @@ export function WithinZoneImageDistribution({ imageRecords, indicatorDefs }: Wit
     }
     return false;
   }, [imageRecords, indicatorIds, zoneList]);
+
+  if (indicatorIds.length === 0 || zoneList.length === 0) {
+    return null;
+  }
 
   return (
     <VStack align="stretch" spacing={6} divider={<Box borderTopWidth="1px" borderColor="gray.200" />}>
@@ -1754,6 +1760,7 @@ export function ClusterSizeChart({ archetypes }: ClusterSizeChartProps) {
             const p = (payload?.[0]?.payload ?? {}) as { name?: string; shortName?: string };
             return `${p.shortName ?? ''} — ${p.name ?? ''}`;
           }}
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Recharts' Formatter generic over (value, name, item, index, payload[]) is wider than this call site needs.
           formatter={(v: any, _n: any, ctx: { payload?: { sharePct?: number } }) =>
             [`${v} · ${(ctx.payload?.sharePct ?? 0).toFixed(1)}%`, 'Count']
           }
@@ -1764,6 +1771,7 @@ export function ClusterSizeChart({ archetypes }: ClusterSizeChartProps) {
           <LabelList
             dataKey="count"
             position="top"
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Recharts' LabelContentType is too strict; we accept the loose prop bag and validate inside.
             content={(props: any) => {
               const x = Number(props.x);
               const y = Number(props.y);
@@ -3411,7 +3419,19 @@ export function SilhouettePerPointPlot({
   const validPts = silhouettePerPoint.filter((v): v is number => v !== null);
   const meanSil = validPts.length ? validPts.reduce((a, b) => a + b, 0) / validPts.length : 0;
 
-  let y = 24;
+  // Precompute each group's Y-offset so the map callback stays a pure
+  // function of (g, index). Previously this accumulated into a closure
+  // var `y += ...` after rendering each group, which violates React's
+  // "no mutation during render" rule.
+  const groupYOffsets: number[] = [];
+  {
+    let acc = 24;
+    for (const g of grouped) {
+      groupYOffsets.push(acc);
+      acc += g.points.length * barH + groupGap;
+    }
+  }
+
   return (
     <Box overflow="visible">
       <svg width={plotX0 + plotW + 16} height={totalH} style={{ fontFamily: 'system-ui, sans-serif', overflow: 'visible' }}>
@@ -3432,9 +3452,9 @@ export function SilhouettePerPointPlot({
         <text x={plotX0} y={totalH - 2} fontSize={9} fill="#718096">−1</text>
         <text x={plotX0 + plotW} y={totalH - 2} fontSize={9} fill="#718096" textAnchor="end">+1</text>
 
-        {grouped.map((g) => {
+        {grouped.map((g, gi) => {
           const arch = archMap[g.cluster_id];
-          const groupY0 = y;
+          const groupY0 = groupYOffsets[gi];
           const groupH = g.points.length * barH;
           const fill = getZoneColor(g.cluster_id);
           const out = (
@@ -3468,7 +3488,6 @@ export function SilhouettePerPointPlot({
               })}
             </g>
           );
-          y += groupH + groupGap;
           return out;
         })}
       </svg>
