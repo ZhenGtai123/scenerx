@@ -4607,7 +4607,7 @@
       "target_direction": "INCREASE"
     },
     "IND_WLK_RAT": {
-      "name": "Visual Walkability Ratio (merged)",
+      "name": "Visual Walkability Ratio",
       "supporting_papers": [
         {
           "paper_file": "Ye, Y",

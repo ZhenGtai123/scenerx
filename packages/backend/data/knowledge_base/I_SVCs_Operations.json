@@ -8772,7 +8772,7 @@
       "indicator_id": "IND_WLK_RAT",
       "current_value": "Low",
       "target_value": "High",
-      "indicator_name": "Visual Walkability Ratio (merged)",
+      "indicator_name": "Visual Walkability Ratio",
       "svc_matrix_expansion_ref": {
         "indicator_id": "IND_WLK_RAT",
         "semantic_layer_scope": [
@@ -21379,7 +21379,7 @@
       "indicator_id": "IND_WLK_RAT",
       "current_value": "Variable",
       "target_value": "Optimized",
-      "indicator_name": "Visual Walkability Ratio (merged)",
+      "indicator_name": "Visual Walkability Ratio",
       "svc_matrix_expansion_ref": {
         "indicator_id": "IND_WLK_RAT",
         "semantic_layer_scope": [
@@ -23696,7 +23696,7 @@
       "indicator_id": "IND_WLK_RAT",
       "current_value": "Variable",
       "target_value": "Optimized",
-      "indicator_name": "Visual Walkability Ratio (merged)",
+      "indicator_name": "Visual Walkability Ratio",
       "svc_matrix_expansion_ref": {
         "indicator_id": "IND_WLK_RAT",
         "semantic_layer_scope": [
