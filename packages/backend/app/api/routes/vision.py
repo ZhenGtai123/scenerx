@@ -284,6 +284,13 @@ async def analyze_project_image(
         logger.warning("validate_parameters failed: %s", error)
         raise HTTPException(status_code=400, detail=error)
 
+    # Name the Vision API's output folder after the original image (its
+    # filename stem) instead of the internal UUID, so AI_City_View's
+    # outputs/<name>/ is human-readable. Falls back to the UUID when the
+    # record somehow has no filename. Only affects the upstream folder name;
+    # greensvc's own mask storage still keys on image_id.
+    request.image_id = Path(img.filename).stem if img.filename else image_id
+
     # Call Vision API
     result = await vision_client.analyze_image(img.filepath, request)
 
@@ -353,6 +360,13 @@ async def analyze_project_image_panorama(
     # pipeline, AI report), the unselected views simply don't exist.
     allowed_views = set(project.active_panorama_views or []) or {"left", "front", "right"}
     skipped_views: list[str] = []
+
+    # Name each view's Vision API output folder after the original image
+    # (<stem>_<view>) instead of the internal UUID, so AI_City_View's
+    # outputs/ is human-readable. AI_City_View appends _<view> per crop.
+    # Only affects the upstream folder name; greensvc's own per-view mask
+    # storage still keys on the UUID image_id (view_image_id below).
+    request.image_id = Path(img.filename).stem if img.filename else image_id
 
     views_result = await vision_client.analyze_panorama(img.filepath, request)
 
