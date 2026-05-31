@@ -1,0 +1,27 @@
+# Local install (rebuilt inside image)
+node_modules/
+
+# Build output (rebuilt inside image)
+dist/
+.vite/
+
+# Caches
+.eslintcache
+.cache/
+
+# Secrets
+.env
+.env.local
+.env.*.local
+
+# Editor / VCS
+.vscode/
+.idea/
+.git/
+.gitignore
+*.swp
+.DS_Store
+
+# Logs
+*.log
+npm-debug.log*

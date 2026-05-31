@@ -1,0 +1,38 @@
+# Local Python env (rebuilt inside image)
+venv/
+.venv/
+env/
+
+# Caches
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Local state — NOT baked into image. Mounted at runtime via docker-compose.
+data/
+temp/
+outputs/
+*.sqlite
+*.sqlite-*
+*.db
+*.db-*
+
+# Secrets
+.env
+.env.local
+
+# Editor / VCS
+.vscode/
+.idea/
+.git/
+.gitignore
+*.swp
+.DS_Store
+
+# Test artifacts
+htmlcov/
+.coverage*
