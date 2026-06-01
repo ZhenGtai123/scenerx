@@ -125,6 +125,13 @@ services:
       - ./packages/backend/data:/app/data
       - ./packages/backend/outputs:/app/outputs
       - ./packages/backend/temp:/app/temp
+      # SQLite DB lives on a container-local named volume, NOT the bind mount
+      # above: writing the multi-MB project blob to the Docker Desktop Windows
+      # bind mount measured ~37x slower (3.5-7.7s vs ~95ms for 13.7MB) and was
+      # the dominant cost of every save (view switch, pipeline, edit). The
+      # backend auto-migrates an existing data/scenerx.db into this volume on
+      # first boot (see main.py lifespan).
+      - backend_db:/app/dbdata
       # Mount root .env so Settings UI writes (LLM key, vision URL,
       # model name) persist on the host and survive `docker compose down`.
       # Backend's _find_env_file() picks up /app/.env first when present.
@@ -166,6 +173,9 @@ services:
       - ./packages/backend/data:/app/data
       - ./packages/backend/outputs:/app/outputs
       - ./packages/backend/temp:/app/temp
+      # Share the DB volume with the backend — both resolve sqlite_path to
+      # /app/dbdata/scenerx.db, so the worker must see the same volume.
+      - backend_db:/app/dbdata
       - ./.env:/app/.env
     depends_on:
       - backend
@@ -191,3 +201,6 @@ volumes:
   redis_data:
   hf_cache:
   vision_outputs:
+  # Fast container-local storage for the SQLite project DB — keeps multi-MB
+  # blob writes off the slow Windows bind mount. See the backend `volumes:`.
+  backend_db:

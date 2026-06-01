@@ -32,6 +32,36 @@ async def lifespan(app: FastAPI):
     logger.info(f"Data directory: {settings.data_path}")
     logger.info(f"Vision API URL: {settings.vision_api_url}")
 
+    # One-time migration: move the SQLite DB off the slow Docker Desktop Windows
+    # bind mount (data_dir) onto the fast container-local volume (db_dir). A
+    # 13.7 MB project-blob write measured ~37x slower on the bind mount (3.5-7.7s
+    # vs ~95ms), which was the dominant cost of every save. Copy-if-absent so
+    # it's idempotent and never clobbers the volume DB once it exists. We use the
+    # sqlite3 backup API (not a raw file copy) so any active WAL is checkpointed
+    # into a consistent snapshot. The old bind-mount DB is LEFT IN PLACE as a
+    # backup — nothing is deleted.
+    try:
+        import sqlite3 as _sqlite3
+        from pathlib import Path as _Path
+        old_db = settings.data_path / settings.sqlite_db_name
+        new_db = _Path(settings.sqlite_path)
+        if old_db.exists() and not new_db.exists():
+            new_db.parent.mkdir(parents=True, exist_ok=True)
+            _src = _sqlite3.connect(str(old_db))
+            _dst = _sqlite3.connect(str(new_db))
+            try:
+                with _dst:
+                    _src.backup(_dst)
+            finally:
+                _dst.close()
+                _src.close()
+            logger.info(
+                "Migrated SQLite DB from bind mount (%s) onto fast volume (%s); "
+                "old file kept as a backup.", old_db, new_db,
+            )
+    except Exception as e:
+        logger.warning("SQLite DB volume migration skipped due to error: %s", e)
+
     # Initialize SQLite project store
     settings.ensure_directories()
     store = init_project_store(settings.sqlite_path)

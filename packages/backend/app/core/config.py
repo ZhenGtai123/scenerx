@@ -80,6 +80,13 @@ class Settings(BaseSettings):
 
     # SQLite (lightweight persistence)
     sqlite_db_name: str = "scenerx.db"
+    # The SQLite DB lives in its OWN dir, separate from data_dir, so it can be
+    # backed by a fast Docker named volume while the (read-mostly) config files
+    # in data_dir stay on the host bind mount. Writing the multi-MB project blob
+    # to a Docker Desktop Windows bind mount measured ~37x slower than
+    # container-local storage (3.5-7.7s vs ~95ms for a 13.7MB write) and was the
+    # dominant cost of every save — view switch, pipeline run, project edit.
+    db_dir: str = "dbdata"
 
     # Knowledge base filenames (configurable via env)
     kb_evidence_file: str = "SVCs_P_Evidence.json"
@@ -126,13 +133,20 @@ class Settings(BaseSettings):
         return self.base_dir / self.temp_dir
 
     @property
+    def db_path(self) -> Path:
+        """Directory holding the SQLite DB — backed by a fast Docker volume,
+        separate from the bind-mounted data_dir. See db_dir."""
+        return self.base_dir / self.db_dir
+
+    @property
     def sqlite_path(self) -> str:
-        return str(self.data_path / self.sqlite_db_name)
+        return str(self.db_path / self.sqlite_db_name)
 
     def ensure_directories(self) -> None:
         """Ensure all required directories exist"""
         for path in [
             self.data_path,
+            self.db_path,
             self.metrics_code_full_path,
             self.knowledge_base_full_path,
             self.output_full_path,
