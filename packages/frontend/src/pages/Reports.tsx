@@ -1608,6 +1608,43 @@ function Reports() {
       const shouldRunStrategies = isRegen || !haveCachedStrategies;
 
       if (shouldRunStrategies) {
+        // Pre-warm chart summaries into the React Query cache so the narratives
+        // below can ground Agent A's diagnosis. aiOpen now defaults to collapsed,
+        // so panels no longer auto-fetch their summary on render — without this,
+        // collectAnalysisNarratives would be empty for any panel the user hasn't
+        // opened. Mirrors handleExportBundle's prewarm; already-cached summaries
+        // are reused (fetchQuery no-ops on a fresh cache hit). Same query key as
+        // useChartSummary so the entries collectAnalysisNarratives reads match.
+        const summaryCards = CHART_REGISTRY.filter(
+          (c) => c.tab === 'analysis' && c.isAvailable(chartCtx) && !hiddenChartIds.includes(c.id),
+        );
+        await Promise.all(
+          summaryCards.map(async (c) => {
+            const fn = (c as { summaryPayload?: (ctx: unknown) => Record<string, unknown> | null }).summaryPayload;
+            if (typeof fn !== 'function') return;
+            const payload = fn(chartCtx);
+            if (payload == null) return;
+            try {
+              await queryClient.fetchQuery({
+                queryKey: ['chart-summary', c.id, routeProjectId ?? '', groupingMode, payload],
+                queryFn: () => api.analysis.chartSummary({
+                  chart_id: c.id,
+                  chart_title: c.title,
+                  chart_description: (c as { description?: string | null }).description ?? null,
+                  project_id: routeProjectId ?? '',
+                  payload,
+                  project_context: (projectContext ?? null) as Record<string, unknown> | null,
+                  grouping_mode: groupingMode,
+                }).then((r) => r.data),
+                staleTime: 1000 * 60 * 60,
+              });
+            } catch (err) {
+              // Non-fatal — a missing summary just means slightly thinner
+              // grounding for this one chart in the report.
+              console.warn(`[ai-report] pre-warm summary for ${c.id} failed:`, err);
+            }
+          }),
+        );
         const narratives = collectAnalysisNarratives(queryClient, routeProjectId);
         // SSE stream: capture progress events into local state, capture
         // the final `result` event into `streamedStrategies` for next stage.

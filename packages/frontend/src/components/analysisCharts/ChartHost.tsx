@@ -258,7 +258,11 @@ export const ChartHost = forwardRef<ChartHostHandle, ChartHostProps>(
   ) {
     const cardRef = useRef<HTMLDivElement | null>(null);
     const [hasIntersected, setHasIntersected] = useState(false);
-    const [aiOpen, setAiOpen] = useState(true);
+    // Default COLLAPSED so each chart's AI summary (one Gemini call apiece) is
+    // fetched on demand when the user expands the panel — NOT auto-fired for
+    // every chart on render and on every panorama-view switch, which was firing
+    // dozens of LLM calls at once and made view switching laggy. Click to expand.
+    const [aiOpen, setAiOpen] = useState(false);
     const reportedMountRef = useRef(false);
     const toast = useToast();
 
