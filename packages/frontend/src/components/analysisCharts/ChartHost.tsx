@@ -32,6 +32,7 @@ import {
 } from '@chakra-ui/react';
 import { MoreHorizontal, EyeOff, Sparkles, ChevronRight, ChevronDown, FileImage, FileText, FileSpreadsheet, FileCode } from 'lucide-react';
 import type { ChartDescriptor } from './registry';
+import { isChartAvailable as safeIsAvailable } from './registry';
 import type { ChartContext } from './ChartContext';
 import { useChartSummary } from '../../hooks/useApi';
 import { exportArtifact, type ExportFormat } from '../../utils/exportChart';
@@ -360,7 +361,7 @@ export const ChartHost = forwardRef<ChartHostHandle, ChartHostProps>(
     // throw a TypeError from inside summaryPayload and crash the whole
     // React tree (white screen). Honour isAvailable here so each chart
     // only computes its summary payload when its data is actually present.
-    const isChartAvailable = descriptor.isAvailable?.(ctx) ?? true;
+    const isChartAvailable = safeIsAvailable(descriptor, ctx);
     const summaryPayload = (isChartAvailable
       ? descriptor.summaryPayload?.(ctx)
       : null
@@ -401,7 +402,7 @@ export const ChartHost = forwardRef<ChartHostHandle, ChartHostProps>(
             // Caller asked too early — chart body isn't rendered yet.
             return null;
           }
-          if (!descriptor.isAvailable(ctx)) return null;
+          if (!isChartAvailable) return null;
           const canvas = await captureNode();
           if (!canvas) return null;
           return {
@@ -420,7 +421,7 @@ export const ChartHost = forwardRef<ChartHostHandle, ChartHostProps>(
       [effectiveMounted, descriptor, ctx],
     );
 
-    if (!descriptor.isAvailable(ctx)) return null;
+    if (!isChartAvailable) return null;
 
     const tabular = descriptor.exportRows ? descriptor.exportRows(ctx) : null;
     const hasTabular = !!tabular && tabular.rows.length > 0;

@@ -375,9 +375,10 @@ async function captureCardPNG(node: HTMLElement | null): Promise<Blob | null> {
   }
 }
 
-/** Build and trigger download of the bundle ZIP. Returns the count of
- * artifacts that ended up inside the archive (charts that lack SVG, CSV,
- * PNG, and AI summary are skipped). */
+/** Build and trigger download of the bundle ZIP. `charts` is the number of
+ * actual chart IMAGES (SVGs) written; a chart with no rendered figure is
+ * skipped entirely (no orphan CSV / summary), so the charts / csvs / summaries
+ * counts all describe the same set of rendered figures. */
 export async function exportBundle(opts: BundleOptions): Promise<{
   filename: string;
   charts: number;
@@ -418,6 +419,13 @@ export async function exportBundle(opts: BundleOptions): Promise<{
     if (svg) {
       charts.file(`${safeId}.svg`, svg);
       files.push(`charts/${safeId}.svg`);
+      // Count only charts that produced an actual image. A chart that's
+      // "available" on the frontend but degenerate for the current grouping
+      // (e.g. cross-zone z-scores / correlation / radar on a SINGLE zone) has
+      // no server-rendered SVG and no live-DOM node, so it must not inflate the
+      // chart count or ship a lonely CSV/summary with no figure. This is what
+      // made the toast read "13 chart(s)" when only 7 images were in the ZIP.
+      chartCount += 1;
     }
 
     // (2) PNG — opt-in only (`opts.includePNG === true`). html2canvas at any
@@ -435,8 +443,9 @@ export async function exportBundle(opts: BundleOptions): Promise<{
       }
     }
 
-    // (3) CSV — tabular data.
-    if (c.rows && c.rows.length > 0) {
+    // (3) CSV — tabular data. Gated on `svg`: a chart with no figure (skipped
+    // above) shouldn't ship orphan data with no corresponding image.
+    if (svg && c.rows && c.rows.length > 0) {
       const csv = rowsToCSV(c.rows, c.columns);
       if (csv) {
         data.file(`${safeId}.csv`, csv);
@@ -447,7 +456,8 @@ export async function exportBundle(opts: BundleOptions): Promise<{
 
     // (4) AI summary JSON — the model's "What this means" interpretation
     // (overall + key findings + per-unit breakdown + design implication).
-    if (c.aiSummary) {
+    // Gated on `svg` for the same reason: no figure, no summary.
+    if (svg && c.aiSummary) {
       summariesDir.file(
         `${safeId}.json`,
         JSON.stringify(c.aiSummary, null, 2),
@@ -457,7 +467,6 @@ export async function exportBundle(opts: BundleOptions): Promise<{
     }
 
     if (files.length > 0) {
-      chartCount += 1;
       manifest.push({ chart_id: c.chartId, title: c.title, files });
     }
 

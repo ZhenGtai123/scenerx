@@ -112,11 +112,17 @@ export function buildChartContext(args: BuildArgs): ChartContext {
     colorblindMode = false,
   } = args;
 
-  const sortedDiagnostics = zoneAnalysisResult
+  // Guard on the arrays themselves, not just zoneAnalysisResult being truthy: a
+  // panorama view whose bucket holds a partial/empty zone_analysis_result (an
+  // object present but with no zone_diagnostics/zone_statistics — e.g. a view
+  // that has per-image metrics but was never aggregated) would otherwise spread
+  // `undefined` and throw "zone_diagnostics is not iterable", crashing the
+  // whole Reports render instead of just showing empty charts for that view.
+  const sortedDiagnostics = zoneAnalysisResult?.zone_diagnostics
     ? [...zoneAnalysisResult.zone_diagnostics].sort((a, b) => b.mean_abs_z - a.mean_abs_z)
     : [];
 
-  const filteredStats = zoneAnalysisResult
+  const filteredStats = zoneAnalysisResult?.zone_statistics
     ? zoneAnalysisResult.zone_statistics.filter(s => s.layer === selectedLayer)
     : [];
 

@@ -76,7 +76,9 @@ export function generateReport(params: {
   }
 
   // 3. Zone Diagnostics Overview (v6.0 descriptive)
-  const sortedDiags = [...zoneResult.zone_diagnostics].sort((a, b) => b.mean_abs_z - a.mean_abs_z);
+  // Guard the spread — a partial/empty zone_analysis (present but no
+  // zone_diagnostics) would otherwise throw "is not iterable".
+  const sortedDiags = [...(zoneResult.zone_diagnostics ?? [])].sort((a, b) => b.mean_abs_z - a.mean_abs_z);
   if (sortedDiags.length > 0) {
     sections.push('## Zone Diagnostics Overview');
     const zoneDevImg = renderImage('zone-deviation-overview');
