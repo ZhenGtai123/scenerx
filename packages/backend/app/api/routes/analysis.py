@@ -8,6 +8,7 @@ import gc
 import json
 import logging
 import math
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any, AsyncGenerator, Optional
@@ -1768,6 +1769,13 @@ async def _execute_project_pipeline(
         n_total_images, len(no_semantic_images), len(project.uploaded_images),
     )
     img_idx = 0
+    # SSE keepalive state — see the throttled heartbeat yield inside the
+    # indicator loop below. A single image runs every indicator × FMB layer
+    # synchronously (can take 30s+ with no intervening SSE frame), during which
+    # an idle connection gets reset by intermediaries (ERR_EMPTY_RESPONSE) and
+    # the final `result` event is lost. The heartbeat keeps the stream warm.
+    _HEARTBEAT_INTERVAL_S = 5.0
+    last_heartbeat = time.monotonic()
     from app.db.path_resolver import resolve_to_container
     for img in calc_images:
         image_path = str(resolve_to_container(img.mask_filepaths["semantic_map"]))
@@ -1838,6 +1846,15 @@ async def _execute_project_pipeline(
         logger.info("Calculating image %d/%d: %s (%s)", img_idx, n_total_images - len(invalid_images), img.image_id, img.filename)
 
         for ind_id in valid_ids:
+            # SSE keepalive: emit a throttled heartbeat so the connection stays
+            # warm through the long synchronous per-indicator calc below.
+            # Unknown event types are ignored by the frontend (the SSE consumer
+            # only acts on parseable `data:` frames and the store ignores types
+            # it doesn't handle), so this is a UI no-op.
+            now = time.monotonic()
+            if now - last_heartbeat > _HEARTBEAT_INTERVAL_S:
+                last_heartbeat = now
+                yield {"type": "heartbeat"}
             # Full layer
             if ind_id in img.metrics_results:
                 calc_cached += 1
