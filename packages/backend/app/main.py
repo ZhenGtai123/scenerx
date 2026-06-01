@@ -37,6 +37,22 @@ async def lifespan(app: FastAPI):
     store = init_project_store(settings.sqlite_path)
     logger.info("SQLite project store initialized at %s", settings.sqlite_path)
 
+    # One-shot migration: rewrite any absolute Windows / host paths stored
+    # in older projects to container-relative form so reads work regardless
+    # of where the backend is running (host python vs docker container).
+    # Idempotent — already-relative paths are left alone.
+    try:
+        from app.db.path_resolver import migrate_project_paths
+        migrated = 0
+        for project in store.list(limit=10000, offset=0):
+            if migrate_project_paths(project):
+                store.save(project)
+                migrated += 1
+        if migrated:
+            logger.info("Path migration rewrote %d projects to relative paths", migrated)
+    except Exception as e:
+        logger.warning("Path migration skipped due to error: %s", e)
+
     yield
 
     # Shutdown

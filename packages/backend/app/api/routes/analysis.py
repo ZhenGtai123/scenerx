@@ -1768,8 +1768,9 @@ async def _execute_project_pipeline(
         n_total_images, len(no_semantic_images), len(project.uploaded_images),
     )
     img_idx = 0
+    from app.db.path_resolver import resolve_to_container
     for img in calc_images:
-        image_path = img.mask_filepaths["semantic_map"]
+        image_path = str(resolve_to_container(img.mask_filepaths["semantic_map"]))
         # v8.0 — pull the ORIGINAL photograph too. Calculators that compute
         # photographic features (colorfulness, brightness, GLCM texture,
         # Canny edges, HSV saturation) need the unmodified RGB photo; the
@@ -1791,11 +1792,13 @@ async def _execute_project_pipeline(
         # projects and must never be read here. If `original` were ever absent,
         # photo_path stays None and photo-reading calculators degrade to the
         # semantic map internally (src = original_photo_path or semantic_map).
-        photo_path = img.mask_filepaths.get("original")
+        photo_raw = img.mask_filepaths.get("original")
+        photo_path = str(resolve_to_container(photo_raw)) if photo_raw else None
         # v8.0 — also expose the depth map (Depth Anything output, grayscale)
         # for indicators that compute distance/depth statistics, not class
         # ratios. Mapped by the vision pipeline alongside semantic_map.
-        depth_path = img.mask_filepaths.get("depth_map")
+        depth_raw = img.mask_filepaths.get("depth_map")
+        depth_path = str(resolve_to_container(depth_raw)) if depth_raw else None
 
         # Fast inline validation: check if semantic_map is single-color.
         # A single-color PNG compresses extremely well, so use file size as
@@ -1864,9 +1867,10 @@ async def _execute_project_pipeline(
             for layer in ["foreground", "middleground", "background"]:
                 layer_key = f"{ind_id}__{layer}"
                 mask_name = f"{layer}_map"
-                mask_path = img.mask_filepaths.get(mask_name)
-                if not mask_path:
+                mask_raw = img.mask_filepaths.get(mask_name)
+                if not mask_raw:
                     continue
+                mask_path = str(resolve_to_container(mask_raw))
                 if layer_key in img.metrics_results:
                     calc_cached += 1
                     continue

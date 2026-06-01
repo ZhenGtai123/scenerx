@@ -266,7 +266,9 @@ async def analyze_project_image(
     if not img:
         raise HTTPException(status_code=404, detail=f"Image not found: {image_id}")
 
-    if not Path(img.filepath).exists():
+    from app.db.path_resolver import resolve_to_container
+    resolved_filepath = resolve_to_container(img.filepath)
+    if not resolved_filepath.exists():
         raise HTTPException(status_code=404, detail=f"Image file not found on disk: {img.filepath}")
 
     # Validate parameters
@@ -292,7 +294,7 @@ async def analyze_project_image(
     request.image_id = Path(img.filename).stem if img.filename else image_id
 
     # Call Vision API
-    result = await vision_client.analyze_image(img.filepath, request)
+    result = await vision_client.analyze_image(str(resolved_filepath), request)
 
     # Save masks to disk and link to project image
     if result.status == "success" and result.images:
@@ -332,7 +334,9 @@ async def analyze_project_image_panorama(
     if not img:
         raise HTTPException(status_code=404, detail=f"Image not found: {image_id}")
 
-    if not Path(img.filepath).exists():
+    from app.db.path_resolver import resolve_to_container
+    resolved_filepath = resolve_to_container(img.filepath)
+    if not resolved_filepath.exists():
         raise HTTPException(status_code=404, detail=f"Image file not found on disk: {img.filepath}")
 
     valid, error = vision_client.validate_parameters(
@@ -368,7 +372,7 @@ async def analyze_project_image_panorama(
     # storage still keys on the UUID image_id (view_image_id below).
     request.image_id = Path(img.filename).stem if img.filename else image_id
 
-    views_result = await vision_client.analyze_panorama(img.filepath, request)
+    views_result = await vision_client.analyze_panorama(str(resolved_filepath), request)
 
     panorama_views: dict[str, PanoramaViewResult] = {}
     for view_name, view_response in views_result.items():

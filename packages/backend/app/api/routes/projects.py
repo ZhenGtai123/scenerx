@@ -670,7 +670,8 @@ async def get_image_thumbnail(
     if not img:
         raise HTTPException(status_code=404, detail="Image not found")
 
-    original = Path(img.filepath)
+    from app.db.path_resolver import resolve_to_container
+    original = resolve_to_container(img.filepath)
     if not original.exists():
         raise HTTPException(status_code=404, detail="Image file missing")
 
