@@ -147,32 +147,103 @@ def get_settings() -> Settings:
     return Settings()
 
 
+import os
+import tempfile
+import threading
+
+
+_ENV_WRITE_LOCK = threading.Lock()
+
+# Characters that, if present in a value, require single-quoting so the
+# .env loader and docker-compose's `${VAR}` interpolation don't choke:
+#   '#' — pydantic-settings / dotenv treat unquoted '#' as start-of-comment
+#   '$' — docker-compose expands `$VAR` inside unquoted values
+#   ' ' — readability + some parsers split on it
+#   '"' — would clash with an outer double-quote wrap
+_SHELL_UNSAFE = set("#$ \"'\n\r")
+
+
+def _quote_env_value(value: str) -> str:
+    """Single-quote a value if it contains characters that would mis-parse
+    when the file is reloaded.
+
+    Single quotes in a single-quoted value are escaped as `'\''` (the
+    POSIX-shell convention that python-dotenv also understands).
+    """
+    if value == "" or not any(c in _SHELL_UNSAFE for c in value):
+        return value
+    return "'" + value.replace("'", "'\\''") + "'"
+
+
 def update_env_file(updates: dict[str, str]) -> None:
     """Update key=value pairs in the .env file, preserving comments and order.
 
     Existing keys are updated in-place; new keys are appended at the end.
+    Values that contain shell-unsafe characters (`#`, `$`, whitespace,
+    quotes) are single-quoted so the file round-trips correctly.
+
+    The whole operation is serialised through a process-wide lock and
+    persisted via an atomic rename so concurrent PUTs from the Settings
+    UI can't interleave half-written lines.
     """
     env_path = Path(_find_env_file())
-    lines = env_path.read_text(encoding="utf-8").splitlines() if env_path.exists() else []
 
-    remaining = dict(updates)  # keys still to write
-    new_lines: list[str] = []
-    for line in lines:
-        stripped = line.strip()
-        # Skip blank / comment lines unchanged
-        if not stripped or stripped.startswith("#"):
-            new_lines.append(line)
-            continue
-        # Parse KEY=VALUE
-        if "=" in stripped:
-            key = stripped.split("=", 1)[0].strip()
-            if key in remaining:
-                new_lines.append(f"{key}={remaining.pop(key)}")
+    with _ENV_WRITE_LOCK:
+        # Ensure the file (and parent dir) exist before we read+rewrite.
+        # The compose bind-mount of `./.env` creates a host-side directory
+        # if the file is missing, so create the file ahead of time when
+        # we're running on the host. (Inside the container the file is
+        # always already present because compose mounted it.)
+        env_path.parent.mkdir(parents=True, exist_ok=True)
+        if not env_path.exists():
+            env_path.touch()
+
+        lines = env_path.read_text(encoding="utf-8").splitlines()
+        remaining = dict(updates)  # keys still to write
+        new_lines: list[str] = []
+        for line in lines:
+            stripped = line.strip()
+            # Skip blank / comment lines unchanged
+            if not stripped or stripped.startswith("#"):
+                new_lines.append(line)
                 continue
-        new_lines.append(line)
+            # Parse KEY=VALUE
+            if "=" in stripped:
+                key = stripped.split("=", 1)[0].strip()
+                if key in remaining:
+                    new_lines.append(f"{key}={_quote_env_value(remaining.pop(key))}")
+                    continue
+            new_lines.append(line)
 
-    # Append any keys that weren't found in the file
-    for key, value in remaining.items():
-        new_lines.append(f"{key}={value}")
+        # Append any keys that weren't found in the file
+        for key, value in remaining.items():
+            new_lines.append(f"{key}={_quote_env_value(value)}")
 
-    env_path.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
+        # Atomic write where possible: temp file in same dir, then rename.
+        # Fallback to direct write when the target is a docker bind-mounted
+        # file (rename onto a bind mount fails with EBUSY because the
+        # mount holds the destination inode).
+        content = "\n".join(new_lines) + "\n"
+        fd, tmp_path = tempfile.mkstemp(
+            prefix=".env.", dir=str(env_path.parent), text=False,
+        )
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8", newline="") as fh:
+                fh.write(content)
+            try:
+                os.replace(tmp_path, env_path)
+            except OSError as err:
+                # EBUSY (docker bind mount) or EXDEV (cross-device rename) —
+                # in both cases atomicity is impossible; just rewrite in place.
+                if err.errno not in (16, 18):  # EBUSY=16, EXDEV=18
+                    raise
+                env_path.write_text(content, encoding="utf-8")
+                os.unlink(tmp_path)
+        except Exception:
+            # Best-effort cleanup on failure
+            try:
+                if os.path.exists(tmp_path):
+                    os.unlink(tmp_path)
+            except OSError:
+                pass
+            raise

@@ -107,7 +107,7 @@ services:
       - DATABASE_URL=postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-scenerx}
       - REDIS_HOST=redis
       - REDIS_PORT=6379
-      - VISION_API_URL=${VISION_API_URL:-http://vision-api:8000}
+      - VISION_API_URL=${VISION_API_URL:-http://host.docker.internal:8000}
       - LLM_PROVIDER=${LLM_PROVIDER:-gemini}
       - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
@@ -115,6 +115,12 @@ services:
       - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
       - SECRET_KEY=${SECRET_KEY:-CHANGE_ME_RUN_openssl_rand_hex_32}
       - DEBUG=false
+    # `host.docker.internal` is auto-resolved on Mac and Windows Docker
+    # Desktop. On Linux it needs an explicit entry pointing at the
+    # gateway, otherwise the backend can't reach a vision-api running
+    # on the host.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - ./packages/backend/data:/app/data
       - ./packages/backend/outputs:/app/outputs
@@ -148,12 +154,14 @@ services:
       - DATABASE_URL=postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-scenerx}
       - REDIS_HOST=redis
       - REDIS_PORT=6379
-      - VISION_API_URL=${VISION_API_URL:-http://vision-api:8000}
+      - VISION_API_URL=${VISION_API_URL:-http://host.docker.internal:8000}
       - LLM_PROVIDER=${LLM_PROVIDER:-gemini}
       - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - ./packages/backend/data:/app/data
       - ./packages/backend/outputs:/app/outputs
