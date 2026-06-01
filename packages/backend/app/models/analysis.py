@@ -467,4 +467,13 @@ class ProjectPipelineResult(BaseModel):
     calculations_cached: int = 0
     zone_statistics_count: int = 0
     skipped_images: list[SkippedImage] = Field(default_factory=list)
-  
+    # Restored: these three fields were lost to a partial-write truncation
+    # (note the dangling blank line that previously ended this class). Without
+    # them, Pydantic's default extra='ignore' silently dropped the
+    # zone_analysis / design_strategies / steps kwargs at construction — so the
+    # SSE result event AND the persisted zone_analysis_result both came back
+    # empty. That hid the single-zone Reports entry gate (analysis_mode fell
+    # back to 'zone_level') and dropped the pipeline-step badges.
+    zone_analysis: Optional[ZoneAnalysisResult] = None
+    design_strategies: Optional[DesignStrategyResult] = None
+    steps: list[ProjectPipelineProgress] = Field(default_factory=list)
