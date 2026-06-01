@@ -53,6 +53,15 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning("Path migration skipped due to error: %s", e)
 
+    # Self-heal: re-save any project whose stored blob still exceeds the size
+    # budget so ProjectStore.save strips its derived image_records. Idempotent —
+    # only touches still-oversized projects (e.g. one restored from an old
+    # pre-strip backup); a no-op once everything is under budget.
+    try:
+        store.heal_oversized_projects()
+    except Exception as e:
+        logger.warning("Oversized-project heal skipped due to error: %s", e)
+
     yield
 
     # Shutdown

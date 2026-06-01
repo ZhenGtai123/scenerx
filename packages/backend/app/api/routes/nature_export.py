@@ -25,7 +25,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 
 from app.db.project_store import get_project_store
-from app.models.analysis import ZoneAnalysisResult
+from app.models.analysis import ZoneAnalysisResult, ImageRecord
 from app.services import nature_charts
 
 logger = logging.getLogger(__name__)
@@ -44,6 +44,42 @@ def _slugify(s: Optional[str], fallback: str) -> str:
 
 def _timestamp() -> str:
     return datetime.now().strftime("%Y%m%d-%H%M")
+
+
+def _rebuild_image_records(project) -> list[ImageRecord]:
+    """Backend mirror of the frontend ChartContext.rebuildImageRecords.
+
+    image_records are no longer persisted in the project blob (they're O(images)
+    derived data — see ProjectStore._strip_image_records), so rebuild them from
+    uploaded_images[].metrics_results when an export needs them. For panorama
+    projects metrics_results already reflects the active view (update_project
+    swaps it on view switch), so the rebuilt records match what's displayed.
+    """
+    zones = {z.zone_id: z for z in (project.spatial_zones or [])}
+    records: list[ImageRecord] = []
+    for img in (project.uploaded_images or []):
+        if not img.zone_id or not img.metrics_results:
+            continue
+        zone = zones.get(img.zone_id)
+        if not zone:
+            continue
+        for key, value in img.metrics_results.items():
+            if value is None:
+                continue
+            sep = key.find("__")
+            indicator_id = key[:sep] if sep >= 0 else key
+            layer = key[sep + 2:] if sep >= 0 else "full"
+            records.append(ImageRecord(
+                image_id=img.image_id,
+                zone_id=img.zone_id,
+                zone_name=zone.zone_name,
+                indicator_id=indicator_id,
+                layer=layer,
+                value=value,
+                lat=img.latitude,
+                lng=img.longitude,
+            ))
+    return records
 
 
 @router.get("/{project_id}/nature-bundle.zip")
@@ -143,6 +179,13 @@ def nature_bundle(project_id: str, view: str = "zones", view_id: str = ""):
     except Exception as e:
         logger.exception("nature-bundle: failed to validate zone_analysis_result")
         raise HTTPException(status_code=500, detail=f"Invalid analysis state: {e}")
+
+    # image_records are no longer persisted (derived data); rebuild them from
+    # the project's per-image metrics so the safety-nets below (on-the-fly
+    # clustering, cluster-as-zone rebuild) and the E-section charts still work.
+    if not zar.image_records:
+        zar.image_records = _rebuild_image_records(project)
+
     logger.info(
         "nature-bundle: project=%s zar OK (zones=%d, image_records=%d, has_clustering=%s)",
         project_id,
