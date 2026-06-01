@@ -64,7 +64,7 @@ function rebuildImageRecords(project: Project | null): ImageRecord[] {
   if (!project) return [];
   const zoneLookup = new Map(project.spatial_zones.map(z => [z.zone_id, z]));
   const records: ImageRecord[] = [];
-  for (const img of project.uploaded_images) {
+  for (const img of project.uploaded_images ?? []) {
     if (!img.zone_id) continue;
     const zone = zoneLookup.get(img.zone_id);
     if (!zone) continue;
@@ -129,7 +129,7 @@ export function buildChartContext(args: BuildArgs): ChartContext {
   })();
 
   const gpsImages = currentProject
-    ? currentProject.uploaded_images.filter(
+    ? (currentProject.uploaded_images ?? []).filter(
         img => img.has_gps && img.latitude != null && img.longitude != null,
       )
     : [];

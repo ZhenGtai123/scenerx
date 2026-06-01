@@ -113,8 +113,9 @@ function Analysis() {
 
   const projectSummary = useMemo(() => {
     if (!selectedProject) return null;
-    const totalImages = selectedProject.uploaded_images.length;
-    const assigned = selectedProject.uploaded_images.filter(img => img.zone_id);
+    const images = selectedProject.uploaded_images ?? [];
+    const totalImages = images.length;
+    const assigned = images.filter(img => img.zone_id);
     const assignedImages = assigned.length;
     const analyzedImages = assigned.filter(img => {
       const mp = img.mask_filepaths;
@@ -367,7 +368,7 @@ function Analysis() {
             </SimpleGrid>
 
             <Wrap spacing={2} mb={4}>
-              {pipelineResult.steps
+              {(pipelineResult.steps ?? [])
                 // v4 — hide design_strategies pipeline-stage badge here.
                 // For single-zone projects this stage is intentionally skipped
                 // (strategies are auto-fired on the Reports page after the

@@ -68,9 +68,10 @@ export function generateReport(params: {
         ['Zone Statistics Count', String(pipelineResult.zone_statistics_count)],
       ],
     ));
-    if (pipelineResult.steps.length > 0) {
+    const pipelineSteps = pipelineResult.steps ?? [];
+    if (pipelineSteps.length > 0) {
       sections.push('### Pipeline Steps\n');
-      sections.push(pipelineResult.steps.map(s => `- **${s.step}**: ${s.status} — ${s.detail}`).join('\n'));
+      sections.push(pipelineSteps.map(s => `- **${s.step}**: ${s.status} — ${s.detail}`).join('\n'));
     }
   }
 

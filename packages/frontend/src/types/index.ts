@@ -53,7 +53,11 @@ export interface Project {
   updated_at?: string;
   spatial_zones: SpatialZone[];
   spatial_relations: SpatialRelation[];
-  uploaded_images: UploadedImage[];
+  // Optional: the backend may omit this field on some serialization paths
+  // (it is absent rather than `[]` when empty), so consumers must guard
+  // against `undefined` — not just an empty array. See readiness/Analysis/
+  // ChartContext call sites that defensively use `?? []`.
+  uploaded_images?: UploadedImage[];
 
   // Persisted analysis artefacts (server-side source of truth — survive
   // reloads and project switches). Frontend hydrates the Zustand store from
@@ -684,7 +688,11 @@ export interface ProjectPipelineResult {
   skipped_images: SkippedImage[];
   zone_analysis: ZoneAnalysisResult | null;
   design_strategies: DesignStrategyResult | null;
-  steps: ProjectPipelineProgress[];
+  // Optional: `steps` is the LAST field of the SSE `result` frame, so a
+  // truncated/partially-delivered frame (large payload, premature close) can
+  // arrive without it. Renderers must guard with `?? []` rather than assume
+  // presence. See Analysis.tsx pipeline-steps badges and generateReport.ts.
+  steps?: ProjectPipelineProgress[];
 }
 
 export type ProjectPipelineStreamEvent =
