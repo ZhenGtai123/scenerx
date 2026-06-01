@@ -243,14 +243,40 @@ async def create_project(project: ProjectCreate, _user: UserResponse = Depends(g
     return response
 
 
-@router.get("", response_model=list[ProjectResponse])
+def _slim_for_list(project: ProjectResponse) -> ProjectResponse:
+    """Strip heavy analysis blobs + per-image metrics_results for the LIST
+    response. The Projects page only needs counts + per-image
+    zone_id / mask_filepaths / GPS to render cards and compute pipeline status
+    (utils/pipelineStatus.getStageStatuses), not the full analysis or metrics —
+    shrinks a 1,254-image project from ~16 MB to ~1.5 MB in the list payload.
+    """
+    slim_images = [
+        img.model_copy(update={"metrics_results": {}})
+        for img in (project.uploaded_images or [])
+    ]
+    return project.model_copy(update={
+        "uploaded_images": slim_images,
+        "zone_analysis_result": None,
+        "panorama_view_results": {},
+    })
+
+
+@router.get("")
 async def list_projects(
     limit: int = Query(default=50, le=100),
     offset: int = Query(default=0, ge=0),
 ):
-    """List all projects"""
+    """List all projects (slim — no heavy analysis blobs or per-image metrics)."""
     store = get_project_store()
-    return store.list(limit, offset)
+
+    def _build() -> str:
+        projects = store.list(limit, offset)
+        return "[" + ",".join(
+            _slim_for_list(p).model_dump_json() for p in projects
+        ) + "]"
+
+    payload = await asyncio.to_thread(_build)
+    return Response(content=payload, media_type="application/json")
 
 
 def _slim_panorama_for_response(project: ProjectResponse) -> ProjectResponse:

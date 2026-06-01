@@ -123,17 +123,19 @@ class ProjectStore:
         return proj
 
     def list(self, limit: int = 50, offset: int = 0) -> list[ProjectResponse]:
-        rows = self._conn.execute(
-            "SELECT data FROM projects ORDER BY created_at DESC LIMIT ? OFFSET ?",
-            (limit, offset),
-        ).fetchall()
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT data FROM projects ORDER BY created_at DESC LIMIT ? OFFSET ?",
+                (limit, offset),
+            ).fetchall()
         return [ProjectResponse.model_validate_json(r[0]) for r in rows]
 
     def values(self) -> list[ProjectResponse]:
         """Backward-compat: return all projects."""
-        rows = self._conn.execute(
-            "SELECT data FROM projects ORDER BY created_at DESC"
-        ).fetchall()
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT data FROM projects ORDER BY created_at DESC"
+            ).fetchall()
         return [ProjectResponse.model_validate_json(r[0]) for r in rows]
 
     # -- write interface (locked) --
