@@ -181,7 +181,17 @@ class ChartSummaryService:
             existing = {row[1] for row in conn.execute("PRAGMA table_info(chart_summary_cache)").fetchall()}
             for col_name, col_type in _V2_COLUMNS:
                 if col_name not in existing:
-                    conn.execute(f"ALTER TABLE chart_summary_cache ADD COLUMN {col_name} {col_type}")
+                    try:
+                        conn.execute(f"ALTER TABLE chart_summary_cache ADD COLUMN {col_name} {col_type}")
+                    except sqlite3.OperationalError as e:
+                        # TOCTOU race: the Reports page fires many chart-summary
+                        # requests in parallel, each constructing this service in
+                        # a FastAPI threadpool worker. Two workers can both read
+                        # `existing` without the column, then both ALTER — the
+                        # loser raises "duplicate column name". The migration is
+                        # idempotent, so an already-present column is success.
+                        if "duplicate column name" not in str(e).lower():
+                            raise
             conn.commit()
 
     def _lookup(
