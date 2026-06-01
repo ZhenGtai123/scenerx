@@ -12,13 +12,29 @@
 ```bash
 git clone https://github.com/ZhenGtai123/scenerx.git
 cd scenerx
-cp .env.example .env        # one-time, no editing needed — config is done in the UI
-docker compose up -d        # add --profile gpu to also run the vision-api container locally (needs NVIDIA GPU)
+./start.sh                  # macOS / Linux
+.\start.ps1                 # Windows PowerShell
+```
+
+The wrapper script creates `.env` from `.env.example` if missing, brings the stack up, and prints the URLs to open. Without the script the equivalent is:
+
+```bash
+cp .env.example .env        # one-time, no editing needed
+docker compose up -d        # add --profile gpu to also run vision-api locally (needs NVIDIA GPU)
 ```
 
 Open **http://localhost:3000** in your browser.
 
 > **Configure everything in the Settings page** — LLM provider, API key, model name, and `VISION_API_URL` all live on the in-app Settings page and persist to `.env` automatically. You never need to edit `.env` by hand. The bundled `.env.example` is only used to create the empty `.env` the backend's auto-save targets.
+
+### Vision API setup
+
+The default `VISION_API_URL=http://host.docker.internal:8000` covers the two most common deployments:
+
+- **AI_City_View running as a separate `docker compose` stack on the same host** (the typical case — `cd ../AI_City_View && ./start.sh`).
+- **Vision-api running natively (python) on the same host.**
+
+If you instead use the combined single-stack mode (`docker compose --profile gpu up -d`), change `VISION_API_URL` to `http://vision-api:8000` in the Settings page (or in `.env` before first boot) — the in-network docker name only resolves inside this compose project.
 
 This repository offers **three reproducibility paths**, in increasing order of effort:
 
