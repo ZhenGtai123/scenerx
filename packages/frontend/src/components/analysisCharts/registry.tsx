@@ -1211,7 +1211,13 @@ export const CHART_REGISTRY: ChartDescriptor[] = [
     viableInModes: ['cluster'],
     isAvailable: (ctx) =>
       !!ctx.effectiveClustering &&
-      ctx.effectiveClustering.archetype_profiles.length > 0,
+      // Require actual per-indicator centroid data, not just the presence of
+      // archetypes. Degenerate clustering (e.g. 1 image per zone) can emit
+      // archetypes whose centroid_z_scores are empty, which would render a
+      // blank heatmap — hide the chart entirely in that case.
+      ctx.effectiveClustering.archetype_profiles.some(
+        (a) => Object.keys(a.centroid_z_scores ?? {}).length > 0,
+      ),
     summaryPayload: (ctx) => {
       const cl = ctx.effectiveClustering;
       if (!cl) return null;
@@ -1414,7 +1420,12 @@ export const CHART_REGISTRY: ChartDescriptor[] = [
     description: 'z-score radar for each discovered cluster.',
     viableInModes: ['cluster'],
     isAvailable: (ctx) =>
-      !!ctx.effectiveClustering && ctx.effectiveClustering.archetype_profiles.length > 0,
+      !!ctx.effectiveClustering &&
+      // See cluster-centroid-heatmap: require non-empty centroid_values so a
+      // degenerate clustering result doesn't render a blank radar.
+      ctx.effectiveClustering.archetype_profiles.some(
+        (a) => Object.keys(a.centroid_values ?? {}).length > 0,
+      ),
     summaryPayload: (ctx) => {
       const cl = ctx.effectiveClustering;
       if (!cl) return null;
