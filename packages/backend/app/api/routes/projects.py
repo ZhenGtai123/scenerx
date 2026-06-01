@@ -252,6 +252,23 @@ async def list_projects(
     return store.list(limit, offset)
 
 
+def _slim_panorama_for_response(project: ProjectResponse) -> ProjectResponse:
+    """Strip the heavy per-view zone_analysis duplicates out of
+    ``panorama_view_results`` before sending the project over the wire.
+
+    The frontend only reads which view KEYS exist (a presence check that drives
+    the Left/Front/Right selector in Reports.tsx); the active view's full data is
+    already mirrored into the top-level zone_analysis_result / ai_reports / etc.
+    slots. Storage keeps the full buckets untouched — this only shapes the
+    response. On a panorama project these buckets are ~60% of the payload, which
+    is refetched on every view switch, so trimming them makes switching snappy.
+    """
+    pvr = project.panorama_view_results
+    if not pvr:
+        return project
+    return project.model_copy(update={"panorama_view_results": {v: {} for v in pvr}})
+
+
 @router.get("/{project_id}", response_model=ProjectResponse)
 async def get_project(project_id: str):
     """Get project by ID"""
@@ -259,7 +276,7 @@ async def get_project(project_id: str):
     project = store.get(project_id)
     if not project:
         raise HTTPException(status_code=404, detail=f"Project not found: {project_id}")
-    return project
+    return _slim_panorama_for_response(project)
 
 
 @router.put("/{project_id}", response_model=ProjectResponse)
@@ -455,7 +472,7 @@ async def update_project(project_id: str, updates: ProjectUpdate, _user: UserRes
 
     project.updated_at = datetime.now()
     store.save(project)
-    return project
+    return _slim_panorama_for_response(project)
 
 
 @router.delete("/{project_id}")
