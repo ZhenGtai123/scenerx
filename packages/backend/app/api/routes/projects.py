@@ -4,6 +4,7 @@ import os
 import re
 import uuid
 import shutil
+import asyncio
 import logging
 from datetime import datetime
 from pathlib import Path
@@ -12,7 +13,7 @@ from typing import Optional, List
 logger = logging.getLogger(__name__)
 
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, Form
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 
 from pydantic import BaseModel
 
@@ -269,21 +270,30 @@ def _slim_panorama_for_response(project: ProjectResponse) -> ProjectResponse:
     return project.model_copy(update={"panorama_view_results": {v: {} for v in pvr}})
 
 
-@router.get("/{project_id}", response_model=ProjectResponse)
+@router.get("/{project_id}")
 async def get_project(project_id: str):
-    """Get project by ID"""
+    """Get project by ID.
+
+    A large project (per-image image_records make the blob multi-MB) is
+    CPU-heavy to deserialize, slim and re-serialize. Run all of it in the
+    threadpool via asyncio.to_thread so it never blocks the event loop — one
+    big project can't freeze health checks / SSE / other requests mid-serialize.
+    """
     store = get_project_store()
-    project = store.get(project_id)
+    project = await asyncio.to_thread(store.get, project_id)
     if not project:
         raise HTTPException(status_code=404, detail=f"Project not found: {project_id}")
-    return _slim_panorama_for_response(project)
+    payload = await asyncio.to_thread(
+        lambda: _slim_panorama_for_response(project).model_dump_json()
+    )
+    return Response(content=payload, media_type="application/json")
 
 
-@router.put("/{project_id}", response_model=ProjectResponse)
+@router.put("/{project_id}")
 async def update_project(project_id: str, updates: ProjectUpdate, _user: UserResponse = Depends(get_current_user)):
     """Update project"""
     store = get_project_store()
-    project = store.get(project_id)
+    project = await asyncio.to_thread(store.get, project_id)
     if not project:
         raise HTTPException(status_code=404, detail=f"Project not found: {project_id}")
 
@@ -471,8 +481,11 @@ async def update_project(project_id: str, updates: ProjectUpdate, _user: UserRes
         )
 
     project.updated_at = datetime.now()
-    store.save(project)
-    return _slim_panorama_for_response(project)
+    await asyncio.to_thread(store.save, project)
+    payload = await asyncio.to_thread(
+        lambda: _slim_panorama_for_response(project).model_dump_json()
+    )
+    return Response(content=payload, media_type="application/json")
 
 
 @router.delete("/{project_id}")

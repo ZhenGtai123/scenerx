@@ -13,6 +13,12 @@ from app.models.project import ProjectResponse
 
 logger = logging.getLogger(__name__)
 
+# Warn when a single project's serialized JSON exceeds this. A large blob is a
+# signal that unbounded per-image data (e.g. image_records, duplicated across
+# panorama views / cluster_view) is leaking into the project record, which
+# makes every read/write of that project slow.
+_PROJECT_SIZE_WARN_BYTES = 5 * 1024 * 1024
+
 _CREATE_TABLE = """
 CREATE TABLE IF NOT EXISTS projects (
     id TEXT PRIMARY KEY,
@@ -38,9 +44,15 @@ class ProjectStore:
     # -- read interface (no lock needed for WAL readers) --
 
     def get(self, project_id: str) -> Optional[ProjectResponse]:
-        row = self._conn.execute(
-            "SELECT data FROM projects WHERE id = ?", (project_id,)
-        ).fetchone()
+        # Fetch the raw blob under the lock (the shared connection is not safe
+        # for concurrent access from threadpool workers), but run the expensive
+        # Pydantic deserialize OUTSIDE the lock so parallel reads — e.g. several
+        # view-switch GETs offloaded to the threadpool — parse concurrently
+        # instead of serializing on the lock.
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT data FROM projects WHERE id = ?", (project_id,)
+            ).fetchone()
         if row is None:
             return None
         return ProjectResponse.model_validate_json(row[0])
@@ -75,6 +87,15 @@ class ProjectStore:
 
     def save(self, project: ProjectResponse) -> None:
         data = project.model_dump_json()
+        if len(data) > _PROJECT_SIZE_WARN_BYTES:
+            logger.warning(
+                "Project %s serialized to %.1f MB (budget %d MB). Unbounded "
+                "per-image data (e.g. image_records duplicated across panorama "
+                "views / cluster_view) is likely leaking into the project blob — "
+                "every read/write of this project will be slow.",
+                project.id, len(data) / 1e6,
+                _PROJECT_SIZE_WARN_BYTES // (1024 * 1024),
+            )
         created = project.created_at.isoformat() if project.created_at else None
         updated = project.updated_at.isoformat() if project.updated_at else None
         with self._lock:
