@@ -43,9 +43,34 @@ async def lifespan(app: FastAPI):
     try:
         import sqlite3 as _sqlite3
         from pathlib import Path as _Path
+
+        def _project_count(db_path: _Path) -> int:
+            """Rows in the projects table, or -1 if the DB file is absent or the
+            table can't be read. Never CREATES the file (guards exists() before
+            connecting) so probing the destination can't leave an empty DB."""
+            if not db_path.exists():
+                return -1
+            try:
+                _c = _sqlite3.connect(str(db_path))
+                try:
+                    return _c.execute("SELECT COUNT(*) FROM projects").fetchone()[0]
+                finally:
+                    _c.close()
+            except Exception:
+                return -1
+
         old_db = settings.data_path / settings.sqlite_db_name
         new_db = _Path(settings.sqlite_path)
-        if old_db.exists() and not new_db.exists():
+        # Migrate when the source HAS data and the destination has NONE yet.
+        # Gating on the destination being EMPTY (count <= 0) rather than merely
+        # absent makes this retry if a prior copy failed or something created an
+        # empty scenerx.db on the volume first — but we still NEVER clobber a
+        # populated destination, so it stays idempotent once real data lives on
+        # the volume. backup() replaces the destination wholesale, which is safe
+        # only because new_count <= 0 means there is nothing there to lose.
+        old_count = _project_count(old_db)
+        new_count = _project_count(new_db)
+        if old_count > 0 and new_count <= 0:
             new_db.parent.mkdir(parents=True, exist_ok=True)
             _src = _sqlite3.connect(str(old_db))
             _dst = _sqlite3.connect(str(new_db))
@@ -56,11 +81,14 @@ async def lifespan(app: FastAPI):
                 _dst.close()
                 _src.close()
             logger.info(
-                "Migrated SQLite DB from bind mount (%s) onto fast volume (%s); "
-                "old file kept as a backup.", old_db, new_db,
+                "Migrated SQLite DB from bind mount (%s, %d projects) onto fast "
+                "volume (%s); old file kept as a backup.", old_db, old_count, new_db,
             )
     except Exception as e:
-        logger.warning("SQLite DB volume migration skipped due to error: %s", e)
+        # ERROR (not WARNING): a failed migration boots on an empty volume DB
+        # while the real data still sits in data/. The empty-destination retry
+        # above recovers automatically on the next boot once the cause is fixed.
+        logger.error("SQLite DB volume migration failed: %s", e, exc_info=True)
 
     # Initialize SQLite project store
     settings.ensure_directories()
