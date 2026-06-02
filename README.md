@@ -34,12 +34,13 @@ docker compose --profile gpu up -d      # also run vision-api locally (NVIDIA GP
 <details>
 <summary>Where does the Vision API run? (read if vision step fails)</summary>
 
-SceneRx itself does no GPU work — it calls out to an external Vision API for segmentation + depth. The default `VISION_API_URL=http://host.docker.internal:8000` assumes one of:
+SceneRx itself does no GPU work — it calls out to an external Vision API for segmentation + depth. The default `VISION_API_URL=http://host.docker.internal:8000` points at **the host machine's port 8000**, which works as-is for all three setups — no edit needed:
 
-- **AI_City_View running as a separate stack on the same host** — recommended. `cd ../AI_City_View && docker compose up`.
+- **`docker compose --profile gpu up -d`** (single-stack) — the bundled `vision-api` container publishes `8000:8000` to the host, so the default reaches it. **No Settings change required.**
+- **AI_City_View running as a separate stack on the same host** — `cd ../AI_City_View && docker compose up`.
 - **Vision-api running natively (python) on the same host.**
 
-For the combined single-stack mode (`docker compose --profile gpu up -d`), change `VISION_API_URL` to `http://vision-api:8000` in the Settings page — the in-network docker name only resolves inside this compose project.
+> Optional (single-stack gpu only): you may set `VISION_API_URL=http://vision-api:8000` in the Settings page — the in-network service name gives a direct container-to-container hop instead of bouncing through the host gateway. Minor optimisation, not required; the name only resolves inside this compose project, which is why it can't be the default.
 </details>
 
 This repository offers **three reproducibility paths**, in increasing order of effort:
