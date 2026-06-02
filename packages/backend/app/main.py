@@ -45,9 +45,8 @@ async def lifespan(app: FastAPI):
         from pathlib import Path as _Path
 
         def _project_count(db_path: _Path) -> int:
-            """Rows in the projects table, or -1 if the DB file is absent or the
-            table can't be read. Never CREATES the file (guards exists() before
-            connecting) so probing the destination can't leave an empty DB."""
+            """Rows in the projects table, or -1 if absent/unreadable. Guards
+            exists() before connecting so probing never creates the file."""
             if not db_path.exists():
                 return -1
             try:
@@ -61,13 +60,9 @@ async def lifespan(app: FastAPI):
 
         old_db = settings.data_path / settings.sqlite_db_name
         new_db = _Path(settings.sqlite_path)
-        # Migrate when the source HAS data and the destination has NONE yet.
-        # Gating on the destination being EMPTY (count <= 0) rather than merely
-        # absent makes this retry if a prior copy failed or something created an
-        # empty scenerx.db on the volume first — but we still NEVER clobber a
-        # populated destination, so it stays idempotent once real data lives on
-        # the volume. backup() replaces the destination wholesale, which is safe
-        # only because new_count <= 0 means there is nothing there to lose.
+        # Migrate only when the source has data and the destination is empty
+        # (count <= 0, not merely absent) — retries a failed/empty copy, yet
+        # NEVER clobbers a populated destination (backup() replaces it wholesale).
         old_count = _project_count(old_db)
         new_count = _project_count(new_db)
         if old_count > 0 and new_count <= 0:
@@ -85,9 +80,8 @@ async def lifespan(app: FastAPI):
                 "volume (%s); old file kept as a backup.", old_db, old_count, new_db,
             )
     except Exception as e:
-        # ERROR (not WARNING): a failed migration boots on an empty volume DB
-        # while the real data still sits in data/. The empty-destination retry
-        # above recovers automatically on the next boot once the cause is fixed.
+        # ERROR: a failed migration boots on an empty volume DB while real data
+        # sits in data/; the empty-destination retry above recovers next boot.
         logger.error("SQLite DB volume migration failed: %s", e, exc_info=True)
 
     # Initialize SQLite project store
