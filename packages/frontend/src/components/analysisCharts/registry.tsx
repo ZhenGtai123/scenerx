@@ -222,6 +222,25 @@ export interface ChartDescriptor {
   } | null;
 }
 
+/**
+ * Call a chart's `isAvailable` predicate defensively. Some predicates read
+ * nested zone_analysis fields directly (e.g. `ctx.zoneAnalysisResult.zone_statistics.length`).
+ * When a panorama view carries a PARTIAL zone_analysis — present as an object
+ * but missing those arrays (a clustering-only bucket with no zone_statistics /
+ * zone_diagnostics) — the predicate throws "Cannot read properties of undefined
+ * (reading 'length')", which the ErrorBoundary turns into a full-page crash.
+ * Treat any throw as "not available" so one malformed context merely hides that
+ * chart instead of taking down the entire Reports render.
+ */
+export function isChartAvailable(descriptor: ChartDescriptor, ctx: ChartContext): boolean {
+  try {
+    return descriptor.isAvailable(ctx);
+  } catch (err) {
+    console.warn(`[chart ${descriptor.id}] isAvailable threw; treating as unavailable`, err);
+    return false;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Helpers for compact summaryPayloads (≤6KB target per chart)
 // ---------------------------------------------------------------------------
@@ -1211,7 +1230,13 @@ export const CHART_REGISTRY: ChartDescriptor[] = [
     viableInModes: ['cluster'],
     isAvailable: (ctx) =>
       !!ctx.effectiveClustering &&
-      ctx.effectiveClustering.archetype_profiles.length > 0,
+      // Require actual per-indicator centroid data, not just the presence of
+      // archetypes. Degenerate clustering (e.g. 1 image per zone) can emit
+      // archetypes whose centroid_z_scores are empty, which would render a
+      // blank heatmap — hide the chart entirely in that case.
+      ctx.effectiveClustering.archetype_profiles.some(
+        (a) => Object.keys(a.centroid_z_scores ?? {}).length > 0,
+      ),
     summaryPayload: (ctx) => {
       const cl = ctx.effectiveClustering;
       if (!cl) return null;
@@ -1414,7 +1439,12 @@ export const CHART_REGISTRY: ChartDescriptor[] = [
     description: 'z-score radar for each discovered cluster.',
     viableInModes: ['cluster'],
     isAvailable: (ctx) =>
-      !!ctx.effectiveClustering && ctx.effectiveClustering.archetype_profiles.length > 0,
+      !!ctx.effectiveClustering &&
+      // See cluster-centroid-heatmap: require non-empty centroid_values so a
+      // degenerate clustering result doesn't render a blank radar.
+      ctx.effectiveClustering.archetype_profiles.some(
+        (a) => Object.keys(a.centroid_values ?? {}).length > 0,
+      ),
     summaryPayload: (ctx) => {
       const cl = ctx.effectiveClustering;
       if (!cl) return null;
@@ -1468,6 +1498,40 @@ export const CHART_REGISTRY: ChartDescriptor[] = [
     render: (ctx) => <ClusterSizeChart archetypes={ctx.effectiveClustering!.archetype_profiles} />,
   },
 ];
+
+// ---------------------------------------------------------------------------
+// Cross-grouping viability gate
+// ---------------------------------------------------------------------------
+// These charts COMPARE across grouping units — z-scores, correlations, radar
+// profiles, priority / indicator matrices. They're meaningless with fewer than
+// 2 grouping units (you can't standardise or compare a single zone against
+// itself), so the backend's nature `render_all` skips them for a 1-unit
+// project. The per-chart predicates only checked the underlying array was
+// non-empty (`length > 0`), which is TRUE even for 1 degenerate unit — so the
+// UI kept showing the cards, the AI-summary pre-warm kept burning an LLM call
+// on each, and the export bundle counted them ("13 charts" vs 7 real images).
+//
+// Wrap their isAvailable once, here, so EVERY consumer (UI list, summary
+// pre-warm, export cards, the isChartAvailable() helper, captureCharts) agrees
+// with the backend. The ≥2 check short-circuits BEFORE the inner predicate, so
+// a degenerate unit also can't trip a throw inside it. Purely additive: it can
+// only HIDE a chart when units < 2, never reveal one — multi-zone and
+// single-zone-with-clustering (≥2 clusters = ≥2 grouping units) are untouched.
+const CROSS_GROUPING_CHART_IDS = new Set<string>([
+  'zone-deviation-overview',
+  'priority-heatmap',
+  'radar-profiles',
+  'spatial-z-deviation',
+  'zone-indicator-matrix',
+  'correlation-heatmap',
+]);
+for (const chart of CHART_REGISTRY) {
+  if (CROSS_GROUPING_CHART_IDS.has(chart.id)) {
+    const inner = chart.isAvailable;
+    chart.isAvailable = (ctx) =>
+      (ctx.sortedDiagnostics?.length ?? 0) >= 2 && inner(ctx);
+  }
+}
 
 // Re-export so consumers can render the section heading next to chart groups.
 export function getDescriptorBySection(

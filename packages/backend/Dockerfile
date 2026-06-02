@@ -23,7 +23,12 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
 # Create non-root user
+# NOTE: create /app/dbdata BEFORE the chown so the SQLite-DB volume mount point
+# exists in the image owned by appuser. Docker initialises a fresh named volume
+# from the image dir's ownership/permissions, so this is what lets the non-root
+# process create scenerx.db inside the (otherwise root-owned) named volume.
 RUN adduser --disabled-password --gecos '' appuser && \
+    mkdir -p /app/dbdata && \
     chown -R appuser:appuser /app
 USER appuser
 

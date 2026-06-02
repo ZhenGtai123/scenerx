@@ -4,6 +4,7 @@ Dependency injection for FastAPI routes
 """
 
 import logging
+import threading
 from functools import lru_cache
 from typing import Optional
 
@@ -187,14 +188,24 @@ def get_report_service() -> ReportService:
     return _report_service
 
 
+# Serialize singleton construction. The Reports page fires many chart-summary
+# requests in parallel; FastAPI runs this sync dependency in threadpool workers,
+# so without a lock multiple workers race to build the service — opening
+# concurrent sqlite connections and racing the schema migration ("duplicate
+# column name" / "database is locked"). Double-checked locking builds it once.
+_chart_summary_lock = threading.Lock()
+
+
 def get_chart_summary_service() -> ChartSummaryService:
     """Get ChartSummaryService singleton (per-chart LLM caption cache)."""
     global _chart_summary_service
     if _chart_summary_service is None:
-        settings = get_settings()
-        llm = get_llm_client()
-        cache_path = settings.data_path / "chart_summary_cache.sqlite"
-        _chart_summary_service = ChartSummaryService(llm_client=llm, cache_db_path=cache_path)
+        with _chart_summary_lock:
+            if _chart_summary_service is None:
+                settings = get_settings()
+                llm = get_llm_client()
+                cache_path = settings.data_path / "chart_summary_cache.sqlite"
+                _chart_summary_service = ChartSummaryService(llm_client=llm, cache_db_path=cache_path)
     return _chart_summary_service
 
 

@@ -574,7 +574,7 @@ function VisionAnalysis() {
     if (!project || selectedProjectImages.size === 0) return { alreadyDone: 0, toProcess: 0 };
     const selectedSet = selectedProjectImages;
     let alreadyDone = 0;
-    for (const img of project.uploaded_images) {
+    for (const img of project.uploaded_images ?? []) {
       if (!selectedSet.has(img.image_id)) continue;
       const mp = img.mask_filepaths;
       if (!mp || Object.keys(mp).length === 0) continue;
@@ -858,7 +858,7 @@ function VisionAnalysis() {
         };
 
         for (const imageId of selectedProjectImages) {
-          const img = project?.uploaded_images.find(i => i.image_id === imageId);
+          const img = project?.uploaded_images?.find(i => i.image_id === imageId);
           if (!img) continue;
 
           // Resume: skip already-processed images (unless user forces re-run)
@@ -1002,7 +1002,8 @@ function VisionAnalysis() {
   // even after a successful analysis pass.
   const readiness = useMemo(() => {
     if (!project) return null;
-    const assigned = project.uploaded_images.filter(img => img.zone_id);
+    const images = project.uploaded_images ?? [];
+    const assigned = images.filter(img => img.zone_id);
     const hasSemantic = (img: UploadedImage) => {
       const mp = img.mask_filepaths;
       if (!mp) return false;
@@ -1024,7 +1025,7 @@ function VisionAnalysis() {
     const withSemantic = assigned.filter(hasSemantic);
     const withFMB = assigned.filter(hasFMB);
     return {
-      totalImages: project.uploaded_images.length,
+      totalImages: images.length,
       assignedCount: assigned.length,
       semanticCount: withSemantic.length,
       fmbCount: withFMB.length,
@@ -1125,7 +1126,7 @@ function VisionAnalysis() {
                   <AlertIcon />
                   <Text fontSize="sm">No project selected. Navigate from a project page to use Vision Analysis.</Text>
                 </Alert>
-              ) : project.uploaded_images.length === 0 ? (
+              ) : (project.uploaded_images?.length ?? 0) === 0 ? (
                 <Alert status="info">
                   <AlertIcon />
                   No images in project. Upload images in the project page first.
@@ -1134,7 +1135,7 @@ function VisionAnalysis() {
                 <VStack align="stretch" spacing={3}>
                   <HStack justify="space-between">
                     <Text fontSize="sm" color="gray.600">
-                      {selectedProjectImages.size} of {project.uploaded_images.length} selected
+                      {selectedProjectImages.size} of {project.uploaded_images?.length ?? 0} selected
                     </Text>
                     <HStack>
                       <Button size="xs" onClick={handleSelectAllImages}>All</Button>
@@ -1142,7 +1143,7 @@ function VisionAnalysis() {
                     </HStack>
                   </HStack>
                   <ImageSelectionGrid
-                    images={project.uploaded_images}
+                    images={project.uploaded_images ?? []}
                     projectId={projectId!}
                     selectedProjectImages={selectedProjectImages}
                     onToggle={toggleImageSelection}
@@ -1394,7 +1395,7 @@ function VisionAnalysis() {
                           const vm = imageId.match(/^(.+)_(left|front|right)$/);
                           const baseId = vm ? vm[1] : imageId;
                           const view = vm ? vm[2] : null;
-                          const img = project?.uploaded_images.find(i => i.image_id === baseId);
+                          const img = project?.uploaded_images?.find(i => i.image_id === baseId);
                           const baseName = img?.filename
                             ? img.filename.replace(/\.[^/.]+$/, '')
                             : baseId;
@@ -1456,7 +1457,7 @@ function VisionAnalysis() {
                     const viewMatch = imageId.match(/^(.+)_(left|front|right)$/);
                     const baseImageId = viewMatch ? viewMatch[1] : imageId;
                     const viewName = viewMatch ? viewMatch[2] : null;
-                    const img = project?.uploaded_images.find(i => i.image_id === baseImageId);
+                    const img = project?.uploaded_images?.find(i => i.image_id === baseImageId);
                     const viewLabels: Record<string, string> = { left: 'Left View', front: 'Front View', right: 'Right View' };
                     const displayLabel = viewName
                       ? `${img?.filename || baseImageId} — ${viewLabels[viewName]}`

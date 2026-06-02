@@ -8,6 +8,7 @@ import gc
 import json
 import logging
 import math
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any, AsyncGenerator, Optional
@@ -1768,6 +1769,13 @@ async def _execute_project_pipeline(
         n_total_images, len(no_semantic_images), len(project.uploaded_images),
     )
     img_idx = 0
+    # SSE keepalive state — see the throttled heartbeat yield inside the
+    # indicator loop below. A single image runs every indicator × FMB layer
+    # synchronously (can take 30s+ with no intervening SSE frame), during which
+    # an idle connection gets reset by intermediaries (ERR_EMPTY_RESPONSE) and
+    # the final `result` event is lost. The heartbeat keeps the stream warm.
+    _HEARTBEAT_INTERVAL_S = 5.0
+    last_heartbeat = time.monotonic()
     from app.db.path_resolver import resolve_to_container
     for img in calc_images:
         image_path = str(resolve_to_container(img.mask_filepaths["semantic_map"]))
@@ -1838,6 +1846,15 @@ async def _execute_project_pipeline(
         logger.info("Calculating image %d/%d: %s (%s)", img_idx, n_total_images - len(invalid_images), img.image_id, img.filename)
 
         for ind_id in valid_ids:
+            # SSE keepalive: emit a throttled heartbeat so the connection stays
+            # warm through the long synchronous per-indicator calc below.
+            # Unknown event types are ignored by the frontend (the SSE consumer
+            # only acts on parseable `data:` frames and the store ignores types
+            # it doesn't handle), so this is a UI no-op.
+            now = time.monotonic()
+            if now - last_heartbeat > _HEARTBEAT_INTERVAL_S:
+                last_heartbeat = now
+                yield {"type": "heartbeat"}
             # Full layer
             if ind_id in img.metrics_results:
                 calc_cached += 1
@@ -2036,11 +2053,13 @@ async def _execute_project_pipeline(
     #   • STRIPPED from the SSE result event (single SSE frame can be 10MB+
     #     for projects with thousands of images, and intermediate proxies
     #     truncate large frames). The stripped copy goes out over the wire.
-    #   • PRESERVED in the persisted zone_analysis_result so that when the
-    #     user reloads the Reports page, the GET /api/projects/{id} call
-    #     returns image_records and the frontend ChartContext can render
-    #     C1 / C3 / C4 (distribution violins, within-zone distribution,
-    #     value spatial map) — those charts gate on imageRecords.length.
+    #   • STRIPPED from the persisted record too — ProjectStore.save() drops
+    #     image_records before writing to keep the blob O(structure). On reload
+    #     the frontend ChartContext rebuilds them from
+    #     uploaded_images[].metrics_results to render C1 / C3 / C4 (distribution
+    #     violins, within-zone distribution, value spatial map). The za_full vs
+    #     za_for_sse split below still matters: za_for_sse must be an independent
+    #     copy so the in-place strip in save() can't empty the SSE frame.
     #
     # Previously a single za dict was mutated in place, which clobbered
     # image_records in BOTH places and forced the frontend to fall back to
@@ -2076,7 +2095,8 @@ async def _execute_project_pipeline(
     # Persist analysis artefacts onto the project so they survive page reloads
     # and project switches. Stored as the same dicts the frontend consumes.
     if zone_result is not None or design_result is not None:
-        # Save the FULL za (with image_records intact) to the project record.
+        # Attach za to the project record; ProjectStore.save() strips its
+        # image_records before persisting (frontend rebuilds them on demand).
         project.zone_analysis_result = za_full if isinstance(za_full, dict) else None
         ds = result_dict.get("design_strategies")
         project.design_strategy_result = ds if isinstance(ds, dict) else None

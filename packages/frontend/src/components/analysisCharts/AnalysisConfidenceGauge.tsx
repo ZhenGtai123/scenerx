@@ -7,7 +7,7 @@ import {
   Tooltip,
   VStack,
 } from '@chakra-ui/react';
-import { CHART_REGISTRY } from './registry';
+import { CHART_REGISTRY, isChartAvailable } from './registry';
 import type { ChartContext } from './ChartContext';
 
 interface AnalysisConfidenceGaugeProps {
@@ -51,7 +51,7 @@ function computeConfidence(
   // Registry chart availability
   const total = CHART_REGISTRY.filter((c) => c.tab === 'analysis').length;
   const available = CHART_REGISTRY.filter(
-    (c) => c.tab === 'analysis' && c.isAvailable(ctx),
+    (c) => c.tab === 'analysis' && isChartAvailable(c, ctx),
   ).length;
   const ratio = total > 0 ? available / total : 0;
   const chartImpact = Math.round(ratio * 30);

@@ -942,6 +942,25 @@ function Reports() {
   // (when actually clustering is still finishing in the background). This
   // flag is true ONLY while handleGenerateAiReport is in flight.
   const [isGeneratingAiReport, setIsGeneratingAiReport] = useState(false);
+  // v4.x — which panorama view a switch is currently in flight TO (null = not
+  // switching). Drives the per-button spinner + a "Loading X view…" status line
+  // so the ~10MB save+refetch round-trip on a view switch isn't a dead,
+  // feedback-less pause. Held until the project refetch settles (the new view's
+  // data is actually in cache), not just until the PUT resolves.
+  const [switchingPanoramaView, setSwitchingPanoramaView] = useState<string | null>(null);
+  // Clear the view-switch spinner only once currentProject actually reflects the
+  // target view. setQueryData updates the React Query cache, but currentProject
+  // (which drives the highlighted button) is set a tick later by App.tsx's
+  // project useEffect — clearing the spinner in the switch handler's finally
+  // raced that and flashed the OLD view highlighted-but-not-loading for a frame
+  // ("等待完会卡一下"). Gating the clear on the store value keeps the spinner up
+  // across the highlight flip so the transition is seamless. Defined here next
+  // to its state; currentProject is already in scope from the store above.
+  useEffect(() => {
+    if (switchingPanoramaView && currentProject?.active_panorama_view === switchingPanoramaView) {
+      setSwitchingPanoramaView(null);
+    }
+  }, [currentProject?.active_panorama_view, switchingPanoramaView]);
   // Held true for the ENTIRE multi-panorama-view clustering loop (which runs
   // one clustering mutation per view sequentially). Without it, the button's
   // spinner is tied to each per-view mutation's isPending and blinks
@@ -1608,6 +1627,49 @@ function Reports() {
       const shouldRunStrategies = isRegen || !haveCachedStrategies;
 
       if (shouldRunStrategies) {
+        // Pre-warm chart summaries into the React Query cache so the narratives
+        // below can ground Agent A's diagnosis. aiOpen now defaults to collapsed,
+        // so panels no longer auto-fetch their summary on render — without this,
+        // collectAnalysisNarratives would be empty for any panel the user hasn't
+        // opened. Mirrors handleExportBundle's prewarm; already-cached summaries
+        // are reused (fetchQuery no-ops on a fresh cache hit). Same query key as
+        // useChartSummary so the entries collectAnalysisNarratives reads match.
+        const summaryCards = CHART_REGISTRY.filter(
+          (c) => c.tab === 'analysis' && c.isAvailable(chartCtx) && !hiddenChartIds.includes(c.id)
+            // Mirror the rendered-set degenerate-N2 hide (see analysisCharts below):
+            // don't prewarm — and therefore don't feed Agent A's grounding — the
+            // cross-grouping charts (B1/B2/B3/B4/D3) that are mathematically
+            // meaningless at <3 grouping units. Without this the report grounds on
+            // their ±0.71 / ±1 grids even though the UI hides them.
+            && !(isDegenerateN2Grouping && DEGENERATE_AT_N2_CHART_IDS.has(c.id)),
+        );
+        await Promise.all(
+          summaryCards.map(async (c) => {
+            const fn = (c as { summaryPayload?: (ctx: unknown) => Record<string, unknown> | null }).summaryPayload;
+            if (typeof fn !== 'function') return;
+            const payload = fn(chartCtx);
+            if (payload == null) return;
+            try {
+              await queryClient.fetchQuery({
+                queryKey: ['chart-summary', c.id, routeProjectId ?? '', groupingMode, payload],
+                queryFn: () => api.analysis.chartSummary({
+                  chart_id: c.id,
+                  chart_title: c.title,
+                  chart_description: (c as { description?: string | null }).description ?? null,
+                  project_id: routeProjectId ?? '',
+                  payload,
+                  project_context: (projectContext ?? null) as Record<string, unknown> | null,
+                  grouping_mode: groupingMode,
+                }).then((r) => r.data),
+                staleTime: 1000 * 60 * 60,
+              });
+            } catch (err) {
+              // Non-fatal — a missing summary just means slightly thinner
+              // grounding for this one chart in the report.
+              console.warn(`[ai-report] pre-warm summary for ${c.id} failed:`, err);
+            }
+          }),
+        );
         const narratives = collectAnalysisNarratives(queryClient, routeProjectId);
         // SSE stream: capture progress events into local state, capture
         // the final `result` event into `streamedStrategies` for next stage.
@@ -3564,21 +3626,24 @@ function Reports() {
                   const handleSwitchPanoramaView = async (view: string) => {
                     if (view === activeView) return;
                     if (!currentProject?.id) return;
+                    // Light up the spinner for THIS view and disable the row;
+                    // cleared in finally once the refetch below settles.
+                    setSwitchingPanoramaView(view);
                     try {
                       // Switch the active panorama view on the BACKEND; update_project
                       // mirrors panorama_view_results[view] into the top-level slots and
-                      // becomes the single source of truth. We refetch (below) so
-                      // hydrateFromProject repopulates every per-view slot. Awaited PUT +
-                      // refetch keeps SQLite and the UI consistent.
+                      // returns the FULL, authoritative post-switch project as its body.
                       //
-                      // NOTE: an "instant" client-side mirror (build the next project in
-                      // memory + setQueryData, with a fire-and-forget PUT) was tried to
-                      // avoid this ~14MB round-trip, but it (a) fed stale per-view data so
-                      // the AI report / confidence didn't update on switch and (b) raced
-                      // the next pipeline run (images skipped until re-clicked). Reverted
-                      // for correctness; if the round-trip is too slow, shrink the
-                      // persisted project payload server-side instead.
-                      await api.projects.update(currentProject.id, { active_panorama_view: view });
+                      // We feed that PUT body straight into the project cache via
+                      // setQueryData (below) instead of issuing a second GET refetch.
+                      // This is NOT the reverted "client-side mirror" — that built the
+                      // next project in memory with a fire-and-forget PUT and fed stale
+                      // per-view data. Here the PUT is AWAITED and the body is the
+                      // backend's OWN mirrored result. We verified PUT response ==
+                      // GET response byte-for-byte (full parsed JSON) across real
+                      // right→front→right switches, so this is identical to the refetch,
+                      // it just skips the redundant ~560ms GET round-trip.
+                      const res = await api.projects.update(currentProject.id, { active_panorama_view: view });
                       const store = useAppStore.getState();
                       // Clear ONLY the data snapshots tied to the OLD
                       // panorama view — the in-memory clusters/zone-cache
@@ -3637,11 +3702,18 @@ function Reports() {
                       store.setAiReport(null);
                       store.setAiReportMeta(null);
                       store.setDesignStrategyResult(null);
-                      // Refetch the project so hydrateFromProject repopulates the store
-                      // from the backend's per-view mirror (the single source of truth).
-                      queryClient.invalidateQueries({ queryKey: queryKeys.project(currentProject.id) });
+                      // Push the authoritative PUT body straight into the project
+                      // cache. Mutating the ['project', id] query data fires App.tsx's
+                      // useEffect -> hydrateFromProject(project) (the exact path the
+                      // refetch used), so every per-view slot repopulates — just sourced
+                      // from the PUT body instead of a second GET. The "Loading X view…"
+                      // spinner therefore covers the one remaining async wait (the PUT).
+                      queryClient.setQueryData(queryKeys.project(currentProject.id), res.data);
                     } catch (err) {
                       console.error('Switch panorama view failed', err);
+                      // On failure currentProject won't flip to the target view, so the
+                      // effect that normally clears the spinner won't fire — clear here.
+                      setSwitchingPanoramaView(null);
                     }
                   };
                   return (
@@ -3660,7 +3732,13 @@ function Reports() {
                             <Button
                               key={v}
                               size="sm"
-                              variant={activeView === v ? 'solid' : 'outline'}
+                              // Optimistic highlight: the moment a switch starts,
+                              // light up the TARGET (switchingPanoramaView) instead of
+                              // waiting ~700ms for currentProject to catch up. The
+                              // clicked tab goes solid immediately (with an inline
+                              // spinner via isLoading), so the row feels instant rather
+                              // than leaving the OLD view highlighted during the load.
+                              variant={(switchingPanoramaView ?? activeView) === v ? 'solid' : 'outline'}
                               colorScheme="purple"
                               borderLeftRadius={isFirst ? undefined : 0}
                               borderRightRadius={isLast ? undefined : 0}
@@ -3672,7 +3750,12 @@ function Reports() {
                               // handleGenerateAiReport awaits a project refetch
                               // before clearing this flag, so by the time the
                               // buttons re-enable the cache + DB are settled.
-                              isDisabled={isGeneratingAiReport}
+                              // Disable the whole row mid-switch so a second
+                              // click can't fire a racing PUT; the target view
+                              // shows an inline spinner via isLoading.
+                              isDisabled={isGeneratingAiReport || switchingPanoramaView !== null}
+                              isLoading={switchingPanoramaView === v}
+                              loadingText={viewLabel(v)}
                               onClick={() => handleSwitchPanoramaView(v)}
                             >
                               {viewLabel(v)}{hasResult ? '' : ' (not run)'}
@@ -3680,6 +3763,14 @@ function Reports() {
                           );
                         })}
                       </HStack>
+                      {switchingPanoramaView && (
+                        <HStack spacing={2} color="purple.600">
+                          <Spinner size="xs" speed="0.7s" thickness="2px" />
+                          <Text fontSize="xs" fontWeight="medium">
+                            Loading {viewLabel(switchingPanoramaView)} view… saving &amp; fetching this view's data
+                          </Text>
+                        </HStack>
+                      )}
                       <Text fontSize="2xs" color="gray.500">
                         Each panorama view has its own independent indicator / clustering /
                         report bucket. Switching here swaps the displayed view without

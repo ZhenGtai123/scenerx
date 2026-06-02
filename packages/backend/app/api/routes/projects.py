@@ -4,6 +4,7 @@ import os
 import re
 import uuid
 import shutil
+import asyncio
 import logging
 from datetime import datetime
 from pathlib import Path
@@ -12,7 +13,7 @@ from typing import Optional, List
 logger = logging.getLogger(__name__)
 
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, Form
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 
 from pydantic import BaseModel
 
@@ -242,31 +243,83 @@ async def create_project(project: ProjectCreate, _user: UserResponse = Depends(g
     return response
 
 
-@router.get("", response_model=list[ProjectResponse])
+def _slim_for_list(project: ProjectResponse) -> ProjectResponse:
+    """Strip heavy analysis blobs + per-image metrics_results for the LIST
+    response. The Projects page only needs counts + per-image
+    zone_id / mask_filepaths / GPS to render cards and compute pipeline status
+    (utils/pipelineStatus.getStageStatuses), not the full analysis or metrics —
+    shrinks a 1,254-image project from ~16 MB to ~1.5 MB in the list payload.
+    """
+    slim_images = [
+        img.model_copy(update={"metrics_results": {}})
+        for img in (project.uploaded_images or [])
+    ]
+    return project.model_copy(update={
+        "uploaded_images": slim_images,
+        "zone_analysis_result": None,
+        "panorama_view_results": {},
+    })
+
+
+@router.get("")
 async def list_projects(
     limit: int = Query(default=50, le=100),
     offset: int = Query(default=0, ge=0),
 ):
-    """List all projects"""
+    """List all projects (slim — no heavy analysis blobs or per-image metrics)."""
     store = get_project_store()
-    return store.list(limit, offset)
+
+    def _build() -> str:
+        projects = store.list(limit, offset)
+        return "[" + ",".join(
+            _slim_for_list(p).model_dump_json() for p in projects
+        ) + "]"
+
+    payload = await asyncio.to_thread(_build)
+    return Response(content=payload, media_type="application/json")
 
 
-@router.get("/{project_id}", response_model=ProjectResponse)
+def _slim_panorama_for_response(project: ProjectResponse) -> ProjectResponse:
+    """Strip the heavy per-view zone_analysis duplicates out of
+    ``panorama_view_results`` before sending the project over the wire.
+
+    The frontend only reads which view KEYS exist (a presence check that drives
+    the Left/Front/Right selector in Reports.tsx); the active view's full data is
+    already mirrored into the top-level zone_analysis_result / ai_reports / etc.
+    slots. Storage keeps the full buckets untouched — this only shapes the
+    response. On a panorama project these buckets are ~60% of the payload, which
+    is refetched on every view switch, so trimming them makes switching snappy.
+    """
+    pvr = project.panorama_view_results
+    if not pvr:
+        return project
+    return project.model_copy(update={"panorama_view_results": {v: {} for v in pvr}})
+
+
+@router.get("/{project_id}")
 async def get_project(project_id: str):
-    """Get project by ID"""
+    """Get project by ID.
+
+    A large project (per-image image_records make the blob multi-MB) is
+    CPU-heavy to deserialize, slim and re-serialize. Run all of it in the
+    threadpool via asyncio.to_thread so it never blocks the event loop — one
+    big project can't freeze health checks / SSE / other requests mid-serialize.
+    """
     store = get_project_store()
-    project = store.get(project_id)
+    project = await asyncio.to_thread(store.get, project_id)
     if not project:
         raise HTTPException(status_code=404, detail=f"Project not found: {project_id}")
-    return project
+    payload = await asyncio.to_thread(
+        lambda: _slim_panorama_for_response(project).model_dump_json()
+    )
+    return Response(content=payload, media_type="application/json")
 
 
-@router.put("/{project_id}", response_model=ProjectResponse)
+@router.put("/{project_id}")
 async def update_project(project_id: str, updates: ProjectUpdate, _user: UserResponse = Depends(get_current_user)):
     """Update project"""
     store = get_project_store()
-    project = store.get(project_id)
+    project = await asyncio.to_thread(store.get, project_id)
     if not project:
         raise HTTPException(status_code=404, detail=f"Project not found: {project_id}")
 
@@ -454,8 +507,11 @@ async def update_project(project_id: str, updates: ProjectUpdate, _user: UserRes
         )
 
     project.updated_at = datetime.now()
-    store.save(project)
-    return project
+    await asyncio.to_thread(store.save, project)
+    payload = await asyncio.to_thread(
+        lambda: _slim_panorama_for_response(project).model_dump_json()
+    )
+    return Response(content=payload, media_type="application/json")
 
 
 @router.delete("/{project_id}")

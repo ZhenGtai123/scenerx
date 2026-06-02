@@ -319,7 +319,7 @@ function ProjectDetail() {
   }, [gpsFilter]);
 
   const handleImageClick = useCallback((imageId: string, index: number, e: React.MouseEvent) => {
-    const ungrouped = (project?.uploaded_images.filter(img => !img.zone_id) || []).filter(matchesGpsFilter);
+    const ungrouped = (project?.uploaded_images?.filter(img => !img.zone_id) || []).filter(matchesGpsFilter);
 
     if (e.shiftKey && lastClickedIndex.current >= 0) {
       const start = Math.min(lastClickedIndex.current, index);
@@ -445,7 +445,7 @@ function ProjectDetail() {
         </HStack>
         <HStack spacing={1}>
           <Text fontSize="sm" color="gray.500">Images:</Text>
-          <Badge colorScheme={hasImages ? 'green' : 'gray'}>{project.uploaded_images.length}</Badge>
+          <Badge colorScheme={hasImages ? 'green' : 'gray'}>{project.uploaded_images?.length ?? 0}</Badge>
         </HStack>
         <HStack spacing={1}>
           <Text fontSize="sm" color="gray.500">Assigned:</Text>
@@ -454,7 +454,7 @@ function ProjectDetail() {
         {hasImages && (
           <HStack spacing={1} title="Images with GPS coordinates (EXIF or filename)">
             <MapPin size={12} color="#319795" />
-            <Badge colorScheme={gpsCount > 0 ? 'teal' : 'gray'}>{gpsCount}/{project.uploaded_images.length}</Badge>
+            <Badge colorScheme={gpsCount > 0 ? 'teal' : 'gray'}>{gpsCount}/{project.uploaded_images?.length ?? 0}</Badge>
           </HStack>
         )}
         {project.performance_dimensions.length > 0 && (

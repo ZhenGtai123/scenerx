@@ -32,6 +32,64 @@ async def lifespan(app: FastAPI):
     logger.info(f"Data directory: {settings.data_path}")
     logger.info(f"Vision API URL: {settings.vision_api_url}")
 
+    # One-time migration: move the SQLite DB off the slow Docker Desktop Windows
+    # bind mount (data_dir) onto the fast container-local volume (db_dir). A
+    # 13.7 MB project-blob write measured ~37x slower on the bind mount (3.5-7.7s
+    # vs ~95ms), which was the dominant cost of every save. Copy-if-absent so
+    # it's idempotent and never clobbers the volume DB once it exists. We use the
+    # sqlite3 backup API (not a raw file copy) so any active WAL is checkpointed
+    # into a consistent snapshot. The old bind-mount DB is LEFT IN PLACE as a
+    # backup — nothing is deleted.
+    try:
+        import sqlite3 as _sqlite3
+        from pathlib import Path as _Path
+
+        def _project_count(db_path: _Path) -> int:
+            """Rows in the projects table, or -1 if the DB file is absent or the
+            table can't be read. Never CREATES the file (guards exists() before
+            connecting) so probing the destination can't leave an empty DB."""
+            if not db_path.exists():
+                return -1
+            try:
+                _c = _sqlite3.connect(str(db_path))
+                try:
+                    return _c.execute("SELECT COUNT(*) FROM projects").fetchone()[0]
+                finally:
+                    _c.close()
+            except Exception:
+                return -1
+
+        old_db = settings.data_path / settings.sqlite_db_name
+        new_db = _Path(settings.sqlite_path)
+        # Migrate when the source HAS data and the destination has NONE yet.
+        # Gating on the destination being EMPTY (count <= 0) rather than merely
+        # absent makes this retry if a prior copy failed or something created an
+        # empty scenerx.db on the volume first — but we still NEVER clobber a
+        # populated destination, so it stays idempotent once real data lives on
+        # the volume. backup() replaces the destination wholesale, which is safe
+        # only because new_count <= 0 means there is nothing there to lose.
+        old_count = _project_count(old_db)
+        new_count = _project_count(new_db)
+        if old_count > 0 and new_count <= 0:
+            new_db.parent.mkdir(parents=True, exist_ok=True)
+            _src = _sqlite3.connect(str(old_db))
+            _dst = _sqlite3.connect(str(new_db))
+            try:
+                with _dst:
+                    _src.backup(_dst)
+            finally:
+                _dst.close()
+                _src.close()
+            logger.info(
+                "Migrated SQLite DB from bind mount (%s, %d projects) onto fast "
+                "volume (%s); old file kept as a backup.", old_db, old_count, new_db,
+            )
+    except Exception as e:
+        # ERROR (not WARNING): a failed migration boots on an empty volume DB
+        # while the real data still sits in data/. The empty-destination retry
+        # above recovers automatically on the next boot once the cause is fixed.
+        logger.error("SQLite DB volume migration failed: %s", e, exc_info=True)
+
     # Initialize SQLite project store
     settings.ensure_directories()
     store = init_project_store(settings.sqlite_path)
@@ -52,6 +110,15 @@ async def lifespan(app: FastAPI):
             logger.info("Path migration rewrote %d projects to relative paths", migrated)
     except Exception as e:
         logger.warning("Path migration skipped due to error: %s", e)
+
+    # Self-heal: re-save any project whose stored blob still exceeds the size
+    # budget so ProjectStore.save strips its derived image_records. Idempotent —
+    # only touches still-oversized projects (e.g. one restored from an old
+    # pre-strip backup); a no-op once everything is under budget.
+    try:
+        store.heal_oversized_projects()
+    except Exception as e:
+        logger.warning("Oversized-project heal skipped due to error: %s", e)
 
     yield
 

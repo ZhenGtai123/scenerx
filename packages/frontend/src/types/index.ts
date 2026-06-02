@@ -53,7 +53,11 @@ export interface Project {
   updated_at?: string;
   spatial_zones: SpatialZone[];
   spatial_relations: SpatialRelation[];
-  uploaded_images: UploadedImage[];
+  // Optional: the backend may omit this field on some serialization paths
+  // (it is absent rather than `[]` when empty), so consumers must guard
+  // against `undefined` — not just an empty array. See readiness/Analysis/
+  // ChartContext call sites that defensively use `?? []`.
+  uploaded_images?: UploadedImage[];
 
   // Persisted analysis artefacts (server-side source of truth — survive
   // reloads and project switches). Frontend hydrates the Zustand store from
@@ -89,10 +93,13 @@ export interface Project {
    *  into the legacy top-level slots so existing components work unchanged
    *  per-view; switching this field causes the mirror to flip. */
   active_panorama_view?: string | null;
-  /** v4.x — Per-view full result bucket. Each entry mirrors the legacy
-   *  top-level slot shape ({ zone_analysis_result, ai_reports,
-   *  ai_report_metas, design_strategy_results, analysis_results_updated_at })
-   *  so the Reports segmented control can swap views without recomputing. */
+  /** v4.x — Per-view full result bucket. The full shape ({ zone_analysis_result,
+   *  ai_reports, ai_report_metas, design_strategy_results,
+   *  analysis_results_updated_at }) lives only in STORAGE. On the GET/PUT wire
+   *  response the backend slims every bucket to `{}` (see
+   *  _slim_panorama_for_response): the active view's data is already mirrored
+   *  into the legacy top-level slots, so the client reads ONLY which view KEYS
+   *  exist here (presence drives the Reports view selector) — never the values. */
   panorama_view_results?: Record<string, Record<string, unknown>>;
 }
 
@@ -684,7 +691,11 @@ export interface ProjectPipelineResult {
   skipped_images: SkippedImage[];
   zone_analysis: ZoneAnalysisResult | null;
   design_strategies: DesignStrategyResult | null;
-  steps: ProjectPipelineProgress[];
+  // Optional: `steps` is the LAST field of the SSE `result` frame, so a
+  // truncated/partially-delivered frame (large payload, premature close) can
+  // arrive without it. Renderers must guard with `?? []` rather than assume
+  // presence. See Analysis.tsx pipeline-steps badges and generateReport.ts.
+  steps?: ProjectPipelineProgress[];
 }
 
 export type ProjectPipelineStreamEvent =
@@ -706,7 +717,11 @@ export type ProjectPipelineStreamEvent =
       cached: number;
     }
   | { type: 'result'; data: ProjectPipelineResult }
-  | { type: 'error'; message: string };
+  | { type: 'error'; message: string }
+  // Keepalive frame emitted every ~5s during long synchronous calc to stop
+  // intermediaries resetting the idle SSE connection. Carries no payload; the
+  // store's onEvent if/else chain has no branch for it, so it's a no-op.
+  | { type: 'heartbeat' };
 
 /**
  * SSE events emitted by /api/analysis/design-strategies/stream.
