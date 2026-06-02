@@ -13,12 +13,23 @@
 git clone https://github.com/ZhenGtai123/scenerx.git
 cd scenerx
 cp .env.example .env
-docker compose up
 ```
 
-Then open → **http://localhost:3000**
+**Have an NVIDIA GPU?** One command — fully self-contained, vision runs locally, nothing else to install:
 
-That's it. LLM key / Vision API URL / model — all configured in the in-app **Settings** page after first launch. `.env` is not meant to be hand-edited.
+```bash
+docker compose --profile gpu up
+```
+
+**No GPU?** Run the stack and offload only the vision pass to the free public endpoint:
+
+```bash
+docker compose up      # then point VISION_API_URL at the HF Space — see "Vision API & GPU"
+```
+
+Then open → **http://localhost:3000**. Set your LLM key in the in-app **Settings** page on first launch (`.env` is not meant to be hand-edited).
+
+> First `--profile gpu` run downloads the vision model weights (~15–25 min) into a cached volume; later runs start in under 30 s.
 
 <details>
 <summary>Alternative startup commands</summary>
@@ -26,22 +37,32 @@ That's it. LLM key / Vision API URL / model — all configured in the in-app **S
 ```bash
 ./start.sh        # macOS / Linux wrapper — also echoes URLs
 .\start.ps1       # Windows PowerShell wrapper
-docker compose up -d                    # detached (no live logs)
-docker compose --profile gpu up -d      # also run vision-api locally (NVIDIA GPU required)
+docker compose --profile gpu up -d      # detached (with local vision-api)
+docker compose up -d                    # detached, vision offloaded to a remote endpoint
 ```
 </details>
 
-<details>
-<summary>Where does the Vision API run? (read if vision step fails)</summary>
+---
 
-SceneRx itself does no GPU work — it calls out to an external Vision API for segmentation + depth. The default `VISION_API_URL=http://host.docker.internal:8000` points at **the host machine's port 8000**, which works as-is for all three setups — no edit needed:
+## Vision API & GPU
 
-- **`docker compose --profile gpu up -d`** (single-stack) — the bundled `vision-api` container publishes `8000:8000` to the host, so the default reaches it. **No Settings change required.**
-- **AI_City_View running as a separate stack on the same host** — `cd ../AI_City_View && docker compose up`.
-- **Vision-api running natively (python) on the same host.**
+SceneRx does no GPU work itself — it calls out to a separate **Vision API** (semantic segmentation + monocular depth), which is its own project: **[AI_City_View](https://github.com/ZhenGtai123/AI_City_View)**. You do **not** need to clone or run it separately: `--profile gpu` pulls a prebuilt image (`ghcr.io/zhengtai123/scenerx-vision`) and runs it as the `vision-api` container inside this same stack.
 
-> Optional (single-stack gpu only): you may set `VISION_API_URL=http://vision-api:8000` in the Settings page — the in-network service name gives a direct container-to-container hop instead of bouncing through the host gateway. Minor optimisation, not required; the name only resolves inside this compose project, which is why it can't be the default.
-</details>
+**GPU requirement.** `--profile gpu` needs an **NVIDIA GPU (≥ 8 GB VRAM) + [Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html)**. On Windows, Docker Desktop must use the WSL2 backend with the toolkit installed *inside* WSL2. Verify:
+
+```bash
+docker run --rm --gpus all nvidia/cuda:12.4.1-base-ubuntu22.04 nvidia-smi
+```
+
+**No GPU?** Drop `--profile gpu` and point the backend at a remote vision endpoint — set `VISION_API_URL` in the in-app **Settings** page (or `.env`):
+
+- **Public Hugging Face Space** — free, zero setup: `https://zhengtai123-scenerx.hf.space/api`
+- **Colab tunnel** — free T4 GPU: see `AI_City_View/vision_api_colab.ipynb` for the ngrok recipe.
+- **Self-hosted AI_City_View** on a GPU box — point at its URL.
+
+> Wiring detail: under `--profile gpu` the default `VISION_API_URL=http://host.docker.internal:8000` already reaches the bundled container (it publishes `8000:8000` to the host). Setting `http://vision-api:8000` is an optional in-network optimisation, not required.
+
+---
 
 This repository offers **three reproducibility paths**, in increasing order of effort:
 
@@ -69,9 +90,7 @@ This demo runs the **vision pipeline only** (Stage 2). For zone analysis, indica
 |---|---|
 | Docker Engine 24+ with `docker compose` | runs all services |
 | One LLM API key — Gemini / OpenAI / Anthropic / DeepSeek | drives recommendation + design stages |
-| (Optional) NVIDIA GPU ≥ 8 GB VRAM + [Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html) | run vision-api locally; otherwise point at a remote endpoint |
-
-> **Windows:** Docker Desktop must use the WSL2 backend, and the NVIDIA Container Toolkit must be installed *inside* WSL2. Verify with `docker run --rm --gpus all nvidia/cuda:12.4.1-base-ubuntu22.04 nvidia-smi`.
+| (Optional) NVIDIA GPU for local vision | run vision-api locally instead of pointing at a remote endpoint — see [Vision API & GPU](#vision-api--gpu) |
 
 ### Steps
 
@@ -91,15 +110,11 @@ Then open **http://localhost:3000** and:
 
 ### Without a local GPU
 
-You can run *every other stage* locally and offload only the vision pass:
+Offload the vision pass to a remote endpoint (full options in [Vision API & GPU](#vision-api--gpu)):
 
 ```bash
-# Option 1 — point at the public Hugging Face Space:
 echo 'VISION_API_URL=https://zhengtai123-scenerx.hf.space/api' >> .env
 make up                    # starts everything except vision-api
-
-# Option 2 — Colab tunnel (free T4 GPU):
-# See AI_City_View/vision_api_colab.ipynb for the ngrok-based recipe.
 ```
 
 ### Verifying the deployment
