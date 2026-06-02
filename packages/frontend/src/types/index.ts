@@ -93,13 +93,9 @@ export interface Project {
    *  into the legacy top-level slots so existing components work unchanged
    *  per-view; switching this field causes the mirror to flip. */
   active_panorama_view?: string | null;
-  /** v4.x — Per-view full result bucket. The full shape ({ zone_analysis_result,
-   *  ai_reports, ai_report_metas, design_strategy_results,
-   *  analysis_results_updated_at }) lives only in STORAGE. On the GET/PUT wire
-   *  response the backend slims every bucket to `{}` (see
-   *  _slim_panorama_for_response): the active view's data is already mirrored
-   *  into the legacy top-level slots, so the client reads ONLY which view KEYS
-   *  exist here (presence drives the Reports view selector) — never the values. */
+  /** v4.x — Per-view result bucket. The full shape lives only in STORAGE; the
+   *  GET/PUT wire response slims every bucket to `{}` (_slim_panorama_for_response),
+   *  so the client reads ONLY which view KEYS exist here — never the values. */
   panorama_view_results?: Record<string, Record<string, unknown>>;
 }
 
@@ -718,9 +714,7 @@ export type ProjectPipelineStreamEvent =
     }
   | { type: 'result'; data: ProjectPipelineResult }
   | { type: 'error'; message: string }
-  // Keepalive frame emitted every ~5s during long synchronous calc to stop
-  // intermediaries resetting the idle SSE connection. Carries no payload; the
-  // store's onEvent if/else chain has no branch for it, so it's a no-op.
+  // SSE keepalive frame (~5s); no payload, ignored by the store's onEvent.
   | { type: 'heartbeat' };
 
 /**

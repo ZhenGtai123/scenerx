@@ -2049,17 +2049,11 @@ async def _execute_project_pipeline(
     # drop the entire result event. The frontend reconstructs image_records from
     # project.uploaded_images[].metrics_results, which it already has.
     result_dict = final.model_dump(mode="json")
-    # CRITICAL — image_records must be:
-    #   • STRIPPED from the SSE result event (single SSE frame can be 10MB+
-    #     for projects with thousands of images, and intermediate proxies
-    #     truncate large frames). The stripped copy goes out over the wire.
-    #   • STRIPPED from the persisted record too — ProjectStore.save() drops
-    #     image_records before writing to keep the blob O(structure). On reload
-    #     the frontend ChartContext rebuilds them from
-    #     uploaded_images[].metrics_results to render C1 / C3 / C4 (distribution
-    #     violins, within-zone distribution, value spatial map). The za_full vs
-    #     za_for_sse split below still matters: za_for_sse must be an independent
-    #     copy so the in-place strip in save() can't empty the SSE frame.
+    # image_records are stripped from BOTH the SSE result frame (a single frame
+    # can be 10MB+ and proxies truncate it) and the persisted blob
+    # (ProjectStore.save drops them to keep it O(structure)); the frontend
+    # rebuilds them from uploaded_images[].metrics_results. za_for_sse must stay
+    # an independent copy so save()'s in-place strip can't empty the SSE frame.
     #
     # Previously a single za dict was mutated in place, which clobbered
     # image_records in BOTH places and forced the frontend to fall back to

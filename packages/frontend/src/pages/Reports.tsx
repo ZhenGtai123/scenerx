@@ -1636,11 +1636,8 @@ function Reports() {
         // useChartSummary so the entries collectAnalysisNarratives reads match.
         const summaryCards = CHART_REGISTRY.filter(
           (c) => c.tab === 'analysis' && c.isAvailable(chartCtx) && !hiddenChartIds.includes(c.id)
-            // Mirror the rendered-set degenerate-N2 hide (see analysisCharts below):
-            // don't prewarm — and therefore don't feed Agent A's grounding — the
-            // cross-grouping charts (B1/B2/B3/B4/D3) that are mathematically
-            // meaningless at <3 grouping units. Without this the report grounds on
-            // their ±0.71 / ±1 grids even though the UI hides them.
+            // Mirror the rendered-set degenerate-N2 hide so Agent A isn't grounded
+            // on charts the UI hides (see analysisCharts below).
             && !(isDegenerateN2Grouping && DEGENERATE_AT_N2_CHART_IDS.has(c.id)),
         );
         await Promise.all(
